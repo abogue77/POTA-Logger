@@ -2,7 +2,7 @@
 """
 HamLog — Ham Radio Station Logger  v2.0
 Cross-platform (Windows & Linux).  Standard library only.
-#Test message 
+
 Entry form field order:
   Callsign → RST Sent → RST Received → Park # → Comments → Notes
 Date/Time : stamped automatically (UTC) when LOG QSO is pressed.
