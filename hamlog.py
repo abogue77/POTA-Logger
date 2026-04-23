@@ -291,6 +291,7 @@ DARK_PALETTE = {
     "SEL": "#2d3a52",
     "MAP_BG": "#0a0e17", "MAP_GRID": "#151c28", "MAP_GRID2": "#2a3347",
     "MAP_COAST": "#1e3a5f", "MAP_GLOW": "#5a3010",
+    "POTA_TUNED": "#0d2e12", "POTA_WORKED": "#0e2040",
 }
 LIGHT_PALETTE = {
     "BG": "#f5f7fa", "BG2": "#eaecf2", "BG3": "#dde1ea", "BG4": "#ced3df",
@@ -299,6 +300,7 @@ LIGHT_PALETTE = {
     "SEL": "#b3c9e8",
     "MAP_BG": "#d0dce8", "MAP_GRID": "#b0c4d8", "MAP_GRID2": "#8aaac8",
     "MAP_COAST": "#4a7ab0", "MAP_GLOW": "#d4a040",
+    "POTA_TUNED": "#c8ecd4", "POTA_WORKED": "#c0d4ee",
 }
 
 def _apply_palette(name="dark"):
@@ -898,8 +900,10 @@ class HamLog(tk.Tk):
         frm.rowconfigure(0, weight=1)
         frm.columnconfigure(0, weight=1)
 
-        self._pota_tree.tag_configure("odd",  background=BG2)
-        self._pota_tree.tag_configure("even", background=BG3)
+        self._pota_tree.tag_configure("odd",    background=BG2)
+        self._pota_tree.tag_configure("even",   background=BG3)
+        self._pota_tree.tag_configure("tuned",  background=POTA_TUNED)
+        self._pota_tree.tag_configure("worked", background=POTA_WORKED)
         self._pota_tree.bind("<<TreeviewSelect>>", self._on_pota_spot_select)
 
     def _on_tab_changed(self, _=None):
@@ -1012,24 +1016,48 @@ class HamLog(tk.Tk):
 
     def _populate_pota_table(self, spots):
         self._pota_tree.delete(*self._pota_tree.get_children())
-        for i, s in enumerate(spots):
+        for s in spots:
             act   = s.get("activator",  s.get("activatorCallsign", ""))
             park  = s.get("reference",  s.get("parkReference", ""))
             pname = s.get("name",       s.get("parkName", ""))
             freq  = s.get("frequency",  s.get("freq", ""))
             mode  = s.get("mode", "")
             stime = s.get("spotTime",   s.get("timestamp", ""))
-            # Trim the spotTime to just HH:MM if it's a full datetime
             if stime and "T" in str(stime):
                 stime = str(stime).split("T")[1][:5] + "z"
             cmts  = s.get("comments",   s.get("comment", ""))
-            tag   = "even" if i % 2 == 0 else "odd"
             self._pota_tree.insert("", "end",
-                values=(act, park, pname, freq, mode, stime, cmts),
-                tags=(tag,))
+                values=(act, park, pname, freq, mode, stime, cmts))
+        self._refresh_pota_highlights()
         now = datetime.datetime.utcnow().strftime("%H:%M:%Sz")
         self._pota_status_lbl.config(
             text=f"● {len(spots)} activators  last updated {now}", fg=ACC3)
+
+    def _refresh_pota_highlights(self):
+        try:
+            rows = self.conn.execute(
+                "SELECT DISTINCT UPPER(call) FROM qso").fetchall()
+            worked = {r[0] for r in rows}
+        except Exception:
+            worked = set()
+        vfo_hz = self._flrig_freq_hz
+        TOLERANCE_HZ = 2000  # ±2 kHz
+        for i, iid in enumerate(self._pota_tree.get_children()):
+            vals = self._pota_tree.item(iid, "values")
+            activator = str(vals[0]).upper()
+            base = "even" if i % 2 == 0 else "odd"
+            if activator in worked:
+                self._pota_tree.item(iid, tags=(base, "worked"))
+                continue
+            if vfo_hz is not None:
+                try:
+                    spot_hz = float(vals[3]) * 1000  # kHz → Hz
+                    if abs(spot_hz - vfo_hz) <= TOLERANCE_HZ:
+                        self._pota_tree.item(iid, tags=(base, "tuned"))
+                        continue
+                except (ValueError, TypeError):
+                    pass
+            self._pota_tree.item(iid, tags=(base,))
 
     def _auto_refresh_pota(self):
         if self._pota_paused:
@@ -1211,6 +1239,7 @@ class HamLog(tk.Tk):
         self._rig_snap_lbl.config(text=snap, fg=ACC3)
         self._set_status(f"Logged ✔  {call}  {date_str} {time_str}z  {freq_disp}  {band}  {mode}")
         self._reload_table()
+        self._refresh_pota_highlights()
         self._clear_form()
 
     # ── Table ─────────────────────────────────────────────────────────────
@@ -1432,6 +1461,7 @@ class HamLog(tk.Tk):
         self._pota_after_id  = None
         self._pota_spots_raw = []
         self._pota_band_var  = tk.StringVar(value="All")
+        self._pota_mode_var  = tk.StringVar(value="All")
         self._pota_hide_qrt  = tk.BooleanVar(value=False)
         self._map_markers    = {}
         self._map_drawn      = False
@@ -1481,6 +1511,7 @@ class HamLog(tk.Tk):
                 self._vfo_freq.config(text=f"{mhz:.4f} MHz", fg=ACCENT)
                 self._vfo_mode.config(text=str(mode) if mode else "—", fg=ACC2)
                 self._vfo_band.config(text=band if band else "—", fg=ACC3)
+                self._refresh_pota_highlights()
             self._flrig_lbl.config(text="● Flrig: online", fg=ACC3)
         else:
             self._vfo_freq.config(text="—", fg=MUTED)
