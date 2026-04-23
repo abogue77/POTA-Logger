@@ -445,6 +445,7 @@ class HamLog(tk.Tk):
         self._pota_after_id = None
         self._pota_spots_raw = []
         self._pota_band_var  = tk.StringVar(value="All")
+        self._pota_mode_var  = tk.StringVar(value="All")
         self._pota_hide_qrt  = tk.BooleanVar(value=False)
         self._map_markers   = {}
         self._map_drawn     = False
@@ -856,6 +857,12 @@ class HamLog(tk.Tk):
             values=["All"], width=6, state="readonly", font=SM)
         self._pota_band_cb.pack(side="left")
         self._pota_band_cb.bind("<<ComboboxSelected>>", lambda _: self._apply_pota_filters())
+        tk.Label(tb, text="Mode:", bg=PBGK, fg=FG2, font=SM).pack(side="left", padx=(8, 2))
+        self._pota_mode_cb = ttk.Combobox(
+            tb, textvariable=self._pota_mode_var,
+            values=["All"], width=7, state="readonly", font=SM)
+        self._pota_mode_cb.pack(side="left")
+        self._pota_mode_cb.bind("<<ComboboxSelected>>", lambda _: self._apply_pota_filters())
         ttk.Checkbutton(
             tb, text="Hide QRT", variable=self._pota_hide_qrt,
             command=self._apply_pota_filters).pack(side="left", padx=(10, 0))
@@ -937,6 +944,11 @@ class HamLog(tk.Tk):
                     return 0.0
             spots = [s for s in spots if freq_to_band(_mhz(s)) == band_sel]
 
+        mode_sel = self._pota_mode_var.get()
+        if mode_sel and mode_sel != "All":
+            spots = [s for s in spots
+                     if str(s.get("mode", "")).upper() == mode_sel.upper()]
+
         if self._pota_hide_qrt.get():
             spots = [s for s in spots
                      if "qrt" not in str(
@@ -948,6 +960,13 @@ class HamLog(tk.Tk):
         } - {""})
         self._pota_band_cb["values"] = ["All"] + all_bands
 
+        all_modes = sorted({
+            str(s.get("mode", "")).upper()
+            for s in self._pota_spots_raw
+            if s.get("mode", "")
+        })
+        self._pota_mode_cb["values"] = ["All"] + all_modes
+
         self._populate_pota_table(spots)
 
     def _on_pota_spot_select(self, event=None):
@@ -955,8 +974,18 @@ class HamLog(tk.Tk):
         if not sel:
             return
         # columns: Activator | Park | Park Name | Freq | Mode | Spotted | Comments
-        # POTA API returns frequency in kHz (e.g. 14225 = 14.225 MHz)
-        freq_str = self._pota_tree.item(sel[0], "values")[3]
+        values = self._pota_tree.item(sel[0], "values")
+        activator = values[0]
+        park      = values[1]
+        freq_str  = values[3]
+
+        # Populate QSO entry fields
+        self.e_call.delete(0, "end")
+        self.e_call.insert(0, activator.upper())
+        self.e_park.delete(0, "end")
+        self.e_park.insert(0, park)
+
+        # Tune radio — POTA API returns frequency in kHz (e.g. 14225 = 14.225 MHz)
         try:
             freq_khz = float(freq_str)
             freq_hz = int(freq_khz * 1_000)
