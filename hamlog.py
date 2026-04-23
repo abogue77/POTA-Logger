@@ -473,12 +473,19 @@ class HamLog(tk.Tk):
     def _style_ttk(self):
         s = ttk.Style()
         s.theme_use("clam")
-        s.configure("Treeview", foreground=FG,
+        s.configure("Treeview", background=BG2, foreground=FG,
                     fieldbackground=BG2, rowheight=22, font=MONO)
         s.configure("Treeview.Heading", background=BG3, foreground=ACCENT,
                     font=LBL, relief="flat")
-        s.map("Treeview", background=[("selected",SEL)],
-                          foreground=[("selected",ACC2)])
+        # The clam theme (and Windows visual styles) inject a
+        # ("!disabled", "!selected") map entry that overrides tag backgrounds
+        # for all normal rows.  Strip it so tag_configure colours show through.
+        def _strip(opt):
+            return [e for e in s.map("Treeview", query_opt=opt)
+                    if e[:2] != ("!disabled", "!selected")]
+        s.map("Treeview",
+              background=_strip("background") + [("selected", SEL)],
+              foreground=_strip("foreground") + [("selected", ACC2)])
         s.configure("TCombobox", fieldbackground=BG3, background=BG3,
                     foreground=FG, arrowcolor=ACCENT)
         s.map("TCombobox", fieldbackground=[("readonly",BG3)],
@@ -1055,7 +1062,6 @@ class HamLog(tk.Tk):
             vfo_hz = self._pota_clicked_hz
         else:
             vfo_hz = self._flrig_freq_hz if self._flrig_freq_hz is not None else self._pota_clicked_hz
-        TOLERANCE_HZ = 2000  # ±2 kHz
         for i, iid in enumerate(self._pota_tree.get_children()):
             vals = self._pota_tree.item(iid, "values")
             activator = str(vals[0]).strip().upper()
@@ -1065,8 +1071,8 @@ class HamLog(tk.Tk):
                 continue
             if vfo_hz is not None:
                 try:
-                    spot_hz = float(vals[3]) * 1000  # kHz → Hz
-                    if abs(spot_hz - vfo_hz) <= TOLERANCE_HZ:
+                    spot_hz = int(float(vals[3]) * 1000)  # kHz → Hz, exact
+                    if spot_hz == int(vfo_hz):
                         self._pota_tree.item(iid, tags=("tuned",))
                         continue
                 except (ValueError, TypeError):
