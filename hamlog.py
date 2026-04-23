@@ -291,7 +291,7 @@ DARK_PALETTE = {
     "SEL": "#2d3a52",
     "MAP_BG": "#0a0e17", "MAP_GRID": "#151c28", "MAP_GRID2": "#2a3347",
     "MAP_COAST": "#1e3a5f", "MAP_GLOW": "#5a3010",
-    "POTA_TUNED": "#0d2e12", "POTA_WORKED": "#0e2040",
+    "POTA_TUNED": "#1e5c28", "POTA_WORKED": "#1a3566",
 }
 LIGHT_PALETTE = {
     "BG": "#f5f7fa", "BG2": "#eaecf2", "BG3": "#dde1ea", "BG4": "#ced3df",
@@ -300,7 +300,7 @@ LIGHT_PALETTE = {
     "SEL": "#b3c9e8",
     "MAP_BG": "#d0dce8", "MAP_GRID": "#b0c4d8", "MAP_GRID2": "#8aaac8",
     "MAP_COAST": "#4a7ab0", "MAP_GLOW": "#d4a040",
-    "POTA_TUNED": "#c8ecd4", "POTA_WORKED": "#c0d4ee",
+    "POTA_TUNED": "#90eea8", "POTA_WORKED": "#90c4f8",
 }
 
 def _apply_palette(name="dark"):
@@ -442,13 +442,14 @@ class HamLog(tk.Tk):
         self._flrig_mode    = None
         self._flrig_poll_id = None
         self._tune_suppress_until = 0.0
-        self._pota_paused   = False
-        self._pota_loaded   = False
-        self._pota_after_id = None
+        self._pota_paused    = False
+        self._pota_loaded    = False
+        self._pota_after_id  = None
         self._pota_spots_raw = []
         self._pota_band_var  = tk.StringVar(value="All")
         self._pota_mode_var  = tk.StringVar(value="All")
         self._pota_hide_qrt  = tk.BooleanVar(value=False)
+        self._pota_clicked_hz = None
         self._map_markers   = {}
         self._map_drawn     = False
         self._map_resize_id = None
@@ -996,6 +997,10 @@ class HamLog(tk.Tk):
             freq_mhz_disp = f"{freq_khz / 1000:.4f}"
         except (ValueError, TypeError):
             return
+
+        # Immediately highlight this row green (fallback when flrig is offline)
+        self._pota_clicked_hz = freq_hz
+        self._refresh_pota_highlights()
         host = self.cfg["flrig_host"]
         port = self.cfg["flrig_port"]
         self._pota_status_lbl.config(text=f"Tuning to {freq_mhz_disp} MHz…", fg=FG2)
@@ -1040,7 +1045,8 @@ class HamLog(tk.Tk):
             worked = {r[0] for r in rows}
         except Exception:
             worked = set()
-        vfo_hz = self._flrig_freq_hz
+        # Prefer live VFO from flrig; fall back to last-clicked spot when offline
+        vfo_hz = self._flrig_freq_hz if self._flrig_freq_hz is not None else self._pota_clicked_hz
         TOLERANCE_HZ = 2000  # ±2 kHz
         for i, iid in enumerate(self._pota_tree.get_children()):
             vals = self._pota_tree.item(iid, "values")
@@ -1463,6 +1469,7 @@ class HamLog(tk.Tk):
         self._pota_band_var  = tk.StringVar(value="All")
         self._pota_mode_var  = tk.StringVar(value="All")
         self._pota_hide_qrt  = tk.BooleanVar(value=False)
+        self._pota_clicked_hz = None
         self._map_markers    = {}
         self._map_drawn      = False
         self._map_resize_id  = None
