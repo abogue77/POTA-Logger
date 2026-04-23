@@ -473,7 +473,7 @@ class HamLog(tk.Tk):
     def _style_ttk(self):
         s = ttk.Style()
         s.theme_use("clam")
-        s.configure("Treeview", background=BG2, foreground=FG,
+        s.configure("Treeview", foreground=FG,
                     fieldbackground=BG2, rowheight=22, font=MONO)
         s.configure("Treeview.Heading", background=BG3, foreground=ACCENT,
                     font=LBL, relief="flat")
@@ -644,8 +644,8 @@ class HamLog(tk.Tk):
         vsb.grid(row=0,column=1,sticky="ns")
         hsb.grid(row=1,column=0,sticky="ew")
         tbl.rowconfigure(0,weight=1); tbl.columnconfigure(0,weight=1)
-        self._tree.tag_configure("odd",  background=BG2)
-        self._tree.tag_configure("even", background=BG3)
+        self._tree.tag_configure("odd",  background=BG2, foreground=FG)
+        self._tree.tag_configure("even", background=BG3, foreground=FG)
         self._tree.bind("<<TreeviewSelect>>", self._on_qso_select)
         self._tree.bind("<Double-1>",         self._edit_qso)
         self._tree.bind("<Delete>",    lambda _: self._delete_qso())
@@ -901,8 +901,8 @@ class HamLog(tk.Tk):
         frm.rowconfigure(0, weight=1)
         frm.columnconfigure(0, weight=1)
 
-        self._pota_tree.tag_configure("odd",    background=BG2)
-        self._pota_tree.tag_configure("even",   background=BG3)
+        self._pota_tree.tag_configure("odd",    background=BG2, foreground=FG)
+        self._pota_tree.tag_configure("even",   background=BG3, foreground=FG)
         self._pota_tree.tag_configure("tuned",  background=POTA_TUNED,  foreground="#000000")
         self._pota_tree.tag_configure("worked",      background=POTA_WORKED, foreground="#000000")
         self._pota_tree.tag_configure("worked_bold", font=("Courier New", 10, "bold"))
