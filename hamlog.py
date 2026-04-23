@@ -291,7 +291,7 @@ DARK_PALETTE = {
     "SEL": "#2d3a52",
     "MAP_BG": "#0a0e17", "MAP_GRID": "#151c28", "MAP_GRID2": "#2a3347",
     "MAP_COAST": "#1e3a5f", "MAP_GLOW": "#5a3010",
-    "POTA_TUNED": "#4d3800", "POTA_WORKED": "#1e5c28",
+    "POTA_TUNED": "#1040a0", "POTA_WORKED": "#00aa44",
 }
 LIGHT_PALETTE = {
     "BG": "#f5f7fa", "BG2": "#eaecf2", "BG3": "#dde1ea", "BG4": "#ced3df",
@@ -300,7 +300,7 @@ LIGHT_PALETTE = {
     "SEL": "#b3c9e8",
     "MAP_BG": "#d0dce8", "MAP_GRID": "#b0c4d8", "MAP_GRID2": "#8aaac8",
     "MAP_COAST": "#4a7ab0", "MAP_GLOW": "#d4a040",
-    "POTA_TUNED": "#ffe8a0", "POTA_WORKED": "#90eea8",
+    "POTA_TUNED": "#5588ff", "POTA_WORKED": "#00cc55",
 }
 
 def _apply_palette(name="dark"):
@@ -903,8 +903,8 @@ class HamLog(tk.Tk):
 
         self._pota_tree.tag_configure("odd",    background=BG2)
         self._pota_tree.tag_configure("even",   background=BG3)
-        self._pota_tree.tag_configure("tuned",  background=POTA_TUNED,  foreground=ACCENT)
-        self._pota_tree.tag_configure("worked", background=POTA_WORKED, foreground=ACC3, font=("Courier New", 10, "bold"))
+        self._pota_tree.tag_configure("tuned",  background=POTA_TUNED,  foreground="#000000")
+        self._pota_tree.tag_configure("worked", background=POTA_WORKED, foreground="#000000", font=("Courier New", 10, "bold"))
         self._pota_tree.bind("<<TreeviewSelect>>", self._on_pota_spot_select)
 
     def _on_tab_changed(self, _=None):
