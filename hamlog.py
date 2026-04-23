@@ -904,7 +904,8 @@ class HamLog(tk.Tk):
         self._pota_tree.tag_configure("odd",    background=BG2)
         self._pota_tree.tag_configure("even",   background=BG3)
         self._pota_tree.tag_configure("tuned",  background=POTA_TUNED,  foreground="#000000")
-        self._pota_tree.tag_configure("worked", background=POTA_WORKED, foreground="#000000", font=("Courier New", 10, "bold"))
+        self._pota_tree.tag_configure("worked",      background=POTA_WORKED, foreground="#000000")
+        self._pota_tree.tag_configure("worked_bold", font=("Courier New", 10, "bold"))
         self._pota_tree.bind("<<TreeviewSelect>>", self._on_pota_spot_select)
 
     def _on_tab_changed(self, _=None):
@@ -1053,7 +1054,7 @@ class HamLog(tk.Tk):
             activator = str(vals[0]).strip().upper()
             base = "even" if i % 2 == 0 else "odd"
             if activator in worked:
-                self._pota_tree.item(iid, tags=(base, "worked"))
+                self._pota_tree.item(iid, tags=(base, "worked", "worked_bold"))
                 continue
             if vfo_hz is not None:
                 try:
