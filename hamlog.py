@@ -998,8 +998,10 @@ class HamLog(tk.Tk):
         except (ValueError, TypeError):
             return
 
-        # Immediately highlight this row green (fallback when flrig is offline)
+        # Immediately highlight this row and suppress the flrig poll
+        # from overwriting it before the tune command completes.
         self._pota_clicked_hz = freq_hz
+        self._tune_suppress_until = time.monotonic() + 4.0
         self._refresh_pota_highlights()
         host = self.cfg["flrig_host"]
         port = self.cfg["flrig_port"]
@@ -1045,8 +1047,14 @@ class HamLog(tk.Tk):
             worked = {r[0] for r in rows if r[0]}
         except Exception:
             worked = set()
-        # Prefer live VFO from flrig; fall back to last-clicked spot when offline
-        vfo_hz = self._flrig_freq_hz if self._flrig_freq_hz is not None else self._pota_clicked_hz
+        # During the suppress window (user just clicked a spot) always use the
+        # clicked frequency so the flrig poll can't overwrite the highlight
+        # before the tune command finishes.  Outside that window, prefer the
+        # live VFO; fall back to the last-clicked spot when flrig is offline.
+        if time.monotonic() < self._tune_suppress_until and self._pota_clicked_hz:
+            vfo_hz = self._pota_clicked_hz
+        else:
+            vfo_hz = self._flrig_freq_hz if self._flrig_freq_hz is not None else self._pota_clicked_hz
         TOLERANCE_HZ = 2000  # ±2 kHz
         for i, iid in enumerate(self._pota_tree.get_children()):
             vals = self._pota_tree.item(iid, "values")
