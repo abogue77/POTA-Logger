@@ -904,7 +904,7 @@ class HamLog(tk.Tk):
         self._pota_tree.tag_configure("odd",    background=BG2)
         self._pota_tree.tag_configure("even",   background=BG3)
         self._pota_tree.tag_configure("tuned",  background=POTA_TUNED,  foreground=ACCENT)
-        self._pota_tree.tag_configure("worked", background=POTA_WORKED, foreground=ACC3)
+        self._pota_tree.tag_configure("worked", background=POTA_WORKED, foreground=ACC3, font=("Courier New", 10, "bold"))
         self._pota_tree.bind("<<TreeviewSelect>>", self._on_pota_spot_select)
 
     def _on_tab_changed(self, _=None):
