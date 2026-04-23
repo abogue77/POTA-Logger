@@ -213,33 +213,37 @@ def freq_to_band(freq_mhz):
 
 # ── Flrig ─────────────────────────────────────────────────────────────────────
 class _TimeoutTransport(xmlrpc.client.Transport):
-    """XML-RPC transport with a hard connection timeout."""
-    timeout = 1.5
+    """XML-RPC transport with a configurable connection/read timeout."""
+    def __init__(self, timeout=2.0):
+        super().__init__()
+        self._timeout = timeout
+
     def make_connection(self, host):
         conn = super().make_connection(host)
-        conn.timeout = self.timeout
+        conn.timeout = self._timeout
         return conn
 
 def flrig_get(host, port):
     try:
         proxy = xmlrpc.client.ServerProxy(
             f"http://{host}:{port}/RPC2",
-            transport=_TimeoutTransport(),
+            transport=_TimeoutTransport(timeout=2.0),
             allow_none=True)
         return proxy.rig.get_vfo(), proxy.rig.get_mode()
     except Exception:
         return None, None
 
 def flrig_set_freq(host, port, freq_hz):
+    """Returns True on success or an error string on failure."""
     try:
         proxy = xmlrpc.client.ServerProxy(
             f"http://{host}:{port}/RPC2",
-            transport=_TimeoutTransport(),
+            transport=_TimeoutTransport(timeout=5.0),
             allow_none=True)
-        proxy.rig.set_vfo(str(int(freq_hz)))
+        proxy.rig.set_vfo(float(freq_hz))
         return True
-    except Exception:
-        return False
+    except Exception as e:
+        return str(e)
 
 # ── QRZ ───────────────────────────────────────────────────────────────────────
 _qrz_session = None
@@ -959,9 +963,13 @@ class HamLog(tk.Tk):
         self._pota_status_lbl.config(text=f"Tuning to {freq_str} MHz…", fg=FG2)
 
         def _tune():
-            ok = flrig_set_freq(host, port, freq_hz)
-            msg = f"Tuned → {freq_str} MHz" if ok else "Tune failed (Flrig offline?)"
-            fg  = ACC3 if ok else WARN
+            result = flrig_set_freq(host, port, freq_hz)
+            if result is True:
+                msg = f"Tuned → {freq_str} MHz"
+                fg  = ACC3
+            else:
+                msg = f"Tune failed: {result}"
+                fg  = WARN
             self.after(0, lambda: self._pota_status_lbl.config(text=msg, fg=fg))
 
         threading.Thread(target=_tune, daemon=True).start()
