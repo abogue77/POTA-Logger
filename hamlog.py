@@ -211,10 +211,20 @@ def freq_to_band(freq_mhz):
     return ""
 
 # ── Flrig ─────────────────────────────────────────────────────────────────────
+class _TimeoutTransport(xmlrpc.client.Transport):
+    """XML-RPC transport with a hard connection timeout."""
+    timeout = 1.5
+    def make_connection(self, host):
+        conn = super().make_connection(host)
+        conn.timeout = self.timeout
+        return conn
+
 def flrig_get(host, port):
     try:
         proxy = xmlrpc.client.ServerProxy(
-            f"http://{host}:{port}/RPC2", allow_none=True)
+            f"http://{host}:{port}/RPC2",
+            transport=_TimeoutTransport(),
+            allow_none=True)
         return proxy.rig.get_vfo(), proxy.rig.get_mode()
     except Exception:
         return None, None
@@ -559,7 +569,12 @@ class HamLog(tk.Tk):
         srch.pack(fill="x", padx=4, pady=(4,4))
         tk.Label(srch, text="SEARCH:", bg=BG, fg=FG2, font=LBL).pack(side="left")
         self._search_var = tk.StringVar()
-        self._search_var.trace_add("write", lambda *_: self._apply_filter())
+        self._search_after_id = None
+        def _debounced_filter(*_):
+            if self._search_after_id:
+                self.after_cancel(self._search_after_id)
+            self._search_after_id = self.after(150, self._apply_filter)
+        self._search_var.trace_add("write", _debounced_filter)
         tk.Entry(srch, textvariable=self._search_var, bg=BG3, fg=FG,
                  font=MONO, relief="flat", insertbackground=ACCENT, bd=4,
                  width=26).pack(side="left", padx=4)
@@ -1001,24 +1016,29 @@ class HamLog(tk.Tk):
 
         self.e_call = tk.Entry(f, width=11, **ent)
         self.e_call.bind("<FocusOut>", self._on_call_focusout)
-        self.e_call.bind("<Return>",   self._on_call_focusout)
+        self.e_call.bind("<Return>",   self._log_qso)
         self.e_call.grid(row=1, column=0, padx=(0,4), sticky="w")
 
         self.e_rst_s = tk.Entry(f, width=5, **ent)
         self.e_rst_s.insert(0,"59")
+        self.e_rst_s.bind("<Return>", self._log_qso)
         self.e_rst_s.grid(row=1, column=1, padx=(10,4), sticky="w")
 
         self.e_rst_r = tk.Entry(f, width=5, **ent)
         self.e_rst_r.insert(0,"59")
+        self.e_rst_r.bind("<Return>", self._log_qso)
         self.e_rst_r.grid(row=1, column=2, padx=(10,4), sticky="w")
 
         self.e_park = tk.Entry(f, width=11, **ent)
+        self.e_park.bind("<Return>", self._log_qso)
         self.e_park.grid(row=1, column=3, padx=(10,4), sticky="w")
 
         self.e_comment = tk.Entry(f, width=22, **ent)
+        self.e_comment.bind("<Return>", self._log_qso)
         self.e_comment.grid(row=1, column=4, padx=(10,4), sticky="ew")
 
         self.e_notes = tk.Entry(f, width=22, **ent)
+        self.e_notes.bind("<Return>", self._log_qso)
         self.e_notes.grid(row=1, column=5, padx=(10,4), sticky="ew")
 
         info_row = tk.Frame(parent, bg=BG)
@@ -1071,7 +1091,7 @@ class HamLog(tk.Tk):
         self.e_call.focus_set()
 
     # ── Log QSO ───────────────────────────────────────────────────────────
-    def _log_qso(self):
+    def _log_qso(self, _=None):
         if not self.adif_path:
             messagebox.showwarning("No Logbook", "Open or create a logbook first.")
             return
@@ -1084,16 +1104,7 @@ class HamLog(tk.Tk):
         date_str = now.strftime("%Y-%m-%d")
         time_str = now.strftime("%H%M")
 
-        freq_hz, rig_mode = flrig_get(self.cfg["flrig_host"],
-                                       self.cfg["flrig_port"])
-        if freq_hz is not None:
-            try:
-                freq_mhz = float(freq_hz) / 1_000_000
-            except Exception:
-                freq_mhz = float(freq_hz)
-            band = freq_to_band(freq_mhz)
-            mode = str(rig_mode).upper() if rig_mode else ""
-        elif self._flrig_freq_hz is not None:
+        if self._flrig_freq_hz is not None:
             try:
                 freq_mhz = float(self._flrig_freq_hz) / 1_000_000
             except Exception:
@@ -1332,11 +1343,22 @@ class HamLog(tk.Tk):
 
     # ── Flrig poll ────────────────────────────────────────────────────────
     def _start_flrig_poll(self):
+        self._flrig_polling = False
         self._do_flrig_poll()
 
     def _do_flrig_poll(self):
-        freq_hz, mode = flrig_get(self.cfg["flrig_host"],
-                                   self.cfg["flrig_port"])
+        if not self._flrig_polling:
+            self._flrig_polling = True
+            host = self.cfg["flrig_host"]
+            port = self.cfg["flrig_port"]
+            def _fetch():
+                freq_hz, mode = flrig_get(host, port)
+                self._flrig_polling = False
+                self.after(0, lambda: self._update_vfo_display(freq_hz, mode))
+            threading.Thread(target=_fetch, daemon=True).start()
+        self._flrig_poll_id = self.after(2000, self._do_flrig_poll)
+
+    def _update_vfo_display(self, freq_hz, mode):
         if freq_hz is not None:
             self._flrig_freq_hz = freq_hz
             self._flrig_mode    = mode
@@ -1354,7 +1376,6 @@ class HamLog(tk.Tk):
             self._vfo_mode.config(text="—", fg=MUTED)
             self._vfo_band.config(text="—", fg=MUTED)
             self._flrig_lbl.config(text="● Flrig: offline", fg=WARN)
-        self._flrig_poll_id = self.after(2000, self._do_flrig_poll)
 
     # ── QRZ ───────────────────────────────────────────────────────────────
     def _qrz_login_bg(self):
