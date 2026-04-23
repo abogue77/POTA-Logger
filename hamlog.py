@@ -232,8 +232,10 @@ def flrig_get(host, port):
 def flrig_set_freq(host, port, freq_hz):
     try:
         proxy = xmlrpc.client.ServerProxy(
-            f"http://{host}:{port}/RPC2", allow_none=True)
-        proxy.rig.set_vfo(int(freq_hz))
+            f"http://{host}:{port}/RPC2",
+            transport=_TimeoutTransport(),
+            allow_none=True)
+        proxy.rig.set_vfo(str(int(freq_hz)))
         return True
     except Exception:
         return False
