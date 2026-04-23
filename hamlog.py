@@ -40,6 +40,7 @@ DEFAULT_CONFIG = {
     "flrig_host": "127.0.0.1",
     "flrig_port": 12345,
     "last_logbook": "",
+    "theme":      "dark",
 }
 
 def load_config():
@@ -277,19 +278,30 @@ def qrz_lookup(call):
     except Exception:
         return None
 
-# ── Palette ───────────────────────────────────────────────────────────────────
-BG     = "#111318"
-BG2    = "#1a1d24"
-BG3    = "#22262f"
-BG4    = "#2a2f3a"
-ACCENT = "#e8a020"
-ACC2   = "#4fc3f7"
-ACC3   = "#81c995"
-WARN   = "#f28b82"
-MUTED  = "#555e6e"
-FG     = "#dde3ee"
-FG2    = "#8c95a6"
-SEL    = "#2d3a52"
+# ── Palettes ──────────────────────────────────────────────────────────────────
+DARK_PALETTE = {
+    "BG": "#111318", "BG2": "#1a1d24", "BG3": "#22262f", "BG4": "#2a2f3a",
+    "ACCENT": "#e8a020", "ACC2": "#4fc3f7", "ACC3": "#81c995",
+    "WARN": "#f28b82", "MUTED": "#555e6e", "FG": "#dde3ee", "FG2": "#8c95a6",
+    "SEL": "#2d3a52",
+    "MAP_BG": "#0a0e17", "MAP_GRID": "#151c28", "MAP_GRID2": "#2a3347",
+    "MAP_COAST": "#1e3a5f", "MAP_GLOW": "#5a3010",
+}
+LIGHT_PALETTE = {
+    "BG": "#f5f7fa", "BG2": "#eaecf2", "BG3": "#dde1ea", "BG4": "#ced3df",
+    "ACCENT": "#b07800", "ACC2": "#0066aa", "ACC3": "#2a7a30",
+    "WARN": "#cc2222", "MUTED": "#7a8599", "FG": "#1a1d24", "FG2": "#4a5568",
+    "SEL": "#b3c9e8",
+    "MAP_BG": "#d0dce8", "MAP_GRID": "#b0c4d8", "MAP_GRID2": "#8aaac8",
+    "MAP_COAST": "#4a7ab0", "MAP_GLOW": "#d4a040",
+}
+
+def _apply_palette(name="dark"):
+    g = globals()
+    for k, v in (LIGHT_PALETTE if name == "light" else DARK_PALETTE).items():
+        g[k] = v
+
+_apply_palette("dark")  # defaults; entry point overrides with saved preference
 
 MONO  = ("Courier New", 10)
 DISP  = ("Courier New", 22, "bold")
@@ -490,6 +502,11 @@ class HamLog(tk.Tk):
         sm.add_command(label="Station Settings…", command=self._station_settings)
         sm.add_command(label="QRZ Login…",        command=self._qrz_settings)
         sm.add_command(label="Flrig Settings…",   command=self._flrig_settings)
+        sm.add_separator()
+        theme_label = ("☀ Switch to Light Mode"
+                       if self.cfg.get("theme", "dark") == "dark"
+                       else "☾ Switch to Dark Mode")
+        sm.add_command(label=theme_label, command=self._switch_theme)
         hm = menu("Help")
         hm.add_command(label="About", command=self._about)
 
@@ -540,7 +557,7 @@ class HamLog(tk.Tk):
 
         tab1 = tk.Frame(self._nb, bg=BG)
         tab2 = tk.Frame(self._nb, bg=BG)
-        tab3 = tk.Frame(self._nb, bg="#0a0e17")
+        tab3 = tk.Frame(self._nb, bg=MAP_BG)
 
         self._nb.add(tab1, text="  QSO Log  ")
         self._nb.add(tab2, text="  Grid Map  ")
@@ -625,8 +642,6 @@ class HamLog(tk.Tk):
 
     # ── Tab 2: Grid Map ───────────────────────────────────────────────────
     def _build_tab_map(self, parent):
-        MAP_BG = "#0a0e17"
-
         # Toolbar
         tb = tk.Frame(parent, bg=MAP_BG)
         tb.pack(fill="x", padx=6, pady=(4,2))
@@ -668,7 +683,6 @@ class HamLog(tk.Tk):
         if W < 10 or H < 10:
             return
         canvas.delete("all")
-        MAP_BG = "#0a0e17"
 
         def px(lon, lat):
             x = (lon + 180) / 360 * W
@@ -679,22 +693,22 @@ class HamLog(tk.Tk):
         for i in range(19):
             lon = -180 + i * 20
             x, _ = px(lon, 0)
-            canvas.create_line(x, 0, x, H, fill="#151c28", width=1, tags="static")
+            canvas.create_line(x, 0, x, H, fill=MAP_GRID, width=1, tags="static")
         for j in range(19):
             lat = 90 - j * 10
             _, y = px(0, lat)
-            canvas.create_line(0, y, W, y, fill="#151c28", width=1, tags="static")
+            canvas.create_line(0, y, W, y, fill=MAP_GRID, width=1, tags="static")
 
         # Field column labels (A–R) along top
         for i in range(18):
             x, _ = px(-180 + i * 20 + 10, 0)
             canvas.create_text(x, 10, text=chr(ord('A') + i),
-                               fill="#2a3347", font=("Courier New", 7), tags="static")
+                               fill=MAP_GRID2, font=("Courier New", 7), tags="static")
         # Field row labels (R–A top to bottom) along left
         for j in range(18):
             _, y = px(0, 90 - j * 10 - 5)
             canvas.create_text(8, y, text=chr(ord('A') + 17 - j),
-                               fill="#2a3347", font=("Courier New", 7), tags="static")
+                               fill=MAP_GRID2, font=("Courier New", 7), tags="static")
 
         # World outline
         for poly in WORLD_OUTLINE:
@@ -705,7 +719,7 @@ class HamLog(tk.Tk):
                 x, y = px(lon, lat)
                 pts.extend((x, y))
             if len(pts) >= 4:
-                canvas.create_line(pts, fill="#1e3a5f", width=1, tags="static")
+                canvas.create_line(pts, fill=MAP_COAST, width=1, tags="static")
 
         self._map_drawn = True
         self._draw_map_markers(W, H)
@@ -746,7 +760,7 @@ class HamLog(tk.Tk):
             cnt = row["cnt"]
             # Glow
             canvas.create_rectangle(x-7, y-5, x+7, y+5,
-                                    fill="#5a3010", outline="", tags="marker")
+                                    fill=MAP_GLOW, outline="", tags="marker")
             # Marker
             canvas.create_rectangle(x-5, y-3, x+5, y+3,
                                     fill=ACCENT, outline="", tags="marker")
@@ -822,7 +836,7 @@ class HamLog(tk.Tk):
 
     # ── Tab 3: POTA Spots ─────────────────────────────────────────────────
     def _build_tab_pota(self, parent):
-        PBGK = "#0a0e17"
+        PBGK = MAP_BG
 
         # Toolbar
         tb = tk.Frame(parent, bg=PBGK)
@@ -1343,6 +1357,54 @@ class HamLog(tk.Tk):
     def _qrz_settings(self):     QRZDialog(self, self.cfg)
     def _flrig_settings(self):   FlrigDialog(self, self.cfg)
 
+    def _switch_theme(self):
+        current = self.cfg.get("theme", "dark")
+        self.cfg["theme"] = "light" if current == "dark" else "dark"
+        save_config(self.cfg)
+        _apply_palette(self.cfg["theme"])
+        self._rebuild_ui()
+
+    def _rebuild_ui(self):
+        for attr in ("_flrig_poll_id", "_pota_after_id", "_map_resize_id"):
+            id_ = getattr(self, attr, None)
+            if id_:
+                self.after_cancel(id_)
+        if getattr(self, "_search_after_id", None):
+            self.after_cancel(self._search_after_id)
+
+        adif_path = self.adif_path
+
+        for w in self.winfo_children():
+            w.destroy()
+
+        self.configure(bg=BG)
+        self._flrig_freq_hz  = None
+        self._flrig_mode     = None
+        self._flrig_poll_id  = None
+        self._flrig_polling  = False
+        self._pota_paused    = False
+        self._pota_loaded    = False
+        self._pota_after_id  = None
+        self._pota_spots_raw = []
+        self._pota_band_var  = tk.StringVar(value="All")
+        self._pota_hide_qrt  = tk.BooleanVar(value=False)
+        self._map_markers    = {}
+        self._map_drawn      = False
+        self._map_resize_id  = None
+        self.adif_path       = ""
+
+        self._style_ttk()
+        self._build_menu()
+        self._build_ui()
+
+        if adif_path and os.path.exists(adif_path):
+            self._open_adif(adif_path)
+
+        if _qrz_session:
+            self._qrz_lbl.config(text="QRZ: ✔", fg=ACC3)
+
+        self._start_flrig_poll()
+
     # ── Flrig poll ────────────────────────────────────────────────────────
     def _start_flrig_poll(self):
         self._flrig_polling = False
@@ -1606,5 +1668,6 @@ class FlrigDialog(tk.Toplevel):
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 if __name__ == "__main__":
+    _apply_palette(load_config().get("theme", "dark"))
     app = HamLog()
     app.mainloop()
