@@ -20,6 +20,7 @@ import urllib.parse
 import xml.etree.ElementTree as ET
 import threading
 import datetime
+import time
 import os
 import re
 import json
@@ -438,6 +439,7 @@ class HamLog(tk.Tk):
         self._flrig_freq_hz = None
         self._flrig_mode    = None
         self._flrig_poll_id = None
+        self._tune_suppress_until = 0.0
         self._pota_paused   = False
         self._pota_loaded   = False
         self._pota_after_id = None
@@ -967,6 +969,8 @@ class HamLog(tk.Tk):
             if result is True:
                 msg = f"Tuned → {freq_str} MHz"
                 fg  = ACC3
+                self._tune_suppress_until = time.monotonic() + 3.0
+                self.after(0, lambda: self._update_vfo_display(freq_hz, self._flrig_mode, force=True))
             else:
                 msg = f"Tune failed: {result}"
                 fg  = WARN
@@ -1390,6 +1394,7 @@ class HamLog(tk.Tk):
         self._flrig_mode     = None
         self._flrig_poll_id  = None
         self._flrig_polling  = False
+        self._tune_suppress_until = 0.0
         self._pota_paused    = False
         self._pota_loaded    = False
         self._pota_after_id  = None
@@ -1430,18 +1435,20 @@ class HamLog(tk.Tk):
             threading.Thread(target=_fetch, daemon=True).start()
         self._flrig_poll_id = self.after(2000, self._do_flrig_poll)
 
-    def _update_vfo_display(self, freq_hz, mode):
+    def _update_vfo_display(self, freq_hz, mode, force=False):
+        suppressed = not force and time.monotonic() < self._tune_suppress_until
         if freq_hz is not None:
-            self._flrig_freq_hz = freq_hz
-            self._flrig_mode    = mode
-            try:
-                mhz = float(freq_hz) / 1_000_000
-            except Exception:
-                mhz = float(freq_hz)
-            band = freq_to_band(mhz)
-            self._vfo_freq.config(text=f"{mhz:.4f} MHz", fg=ACCENT)
-            self._vfo_mode.config(text=str(mode) if mode else "—", fg=ACC2)
-            self._vfo_band.config(text=band if band else "—", fg=ACC3)
+            if not suppressed:
+                self._flrig_freq_hz = freq_hz
+                self._flrig_mode    = mode
+                try:
+                    mhz = float(freq_hz) / 1_000_000
+                except Exception:
+                    mhz = float(freq_hz)
+                band = freq_to_band(mhz)
+                self._vfo_freq.config(text=f"{mhz:.4f} MHz", fg=ACCENT)
+                self._vfo_mode.config(text=str(mode) if mode else "—", fg=ACC2)
+                self._vfo_band.config(text=band if band else "—", fg=ACC3)
             self._flrig_lbl.config(text="● Flrig: online", fg=ACC3)
         else:
             self._vfo_freq.config(text="—", fg=MUTED)
