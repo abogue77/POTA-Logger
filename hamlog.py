@@ -291,7 +291,7 @@ DARK_PALETTE = {
     "SEL": "#2d3a52",
     "MAP_BG": "#0a0e17", "MAP_GRID": "#151c28", "MAP_GRID2": "#2a3347",
     "MAP_COAST": "#1e3a5f", "MAP_GLOW": "#5a3010",
-    "POTA_TUNED": "#1040a0", "POTA_WORKED": "#00aa44",
+    "POTA_TUNED": "#0077ff", "POTA_WORKED": "#00cc44",
 }
 LIGHT_PALETTE = {
     "BG": "#f5f7fa", "BG2": "#eaecf2", "BG3": "#dde1ea", "BG4": "#ced3df",
