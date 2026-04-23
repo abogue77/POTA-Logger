@@ -932,7 +932,7 @@ class HamLog(tk.Tk):
         if band_sel and band_sel != "All":
             def _mhz(s):
                 try:
-                    return float(s.get("frequency", s.get("freq", 0)) or 0)
+                    return float(s.get("frequency", s.get("freq", 0)) or 0) / 1000
                 except Exception:
                     return 0.0
             spots = [s for s in spots if freq_to_band(_mhz(s)) == band_sel]
@@ -943,7 +943,7 @@ class HamLog(tk.Tk):
                          s.get("comments", s.get("comment", ""))).lower()]
 
         all_bands = sorted({
-            freq_to_band(float(s.get("frequency", s.get("freq", 0)) or 0))
+            freq_to_band(float(s.get("frequency", s.get("freq", 0)) or 0) / 1000)
             for s in self._pota_spots_raw
         } - {""})
         self._pota_band_cb["values"] = ["All"] + all_bands
@@ -955,19 +955,22 @@ class HamLog(tk.Tk):
         if not sel:
             return
         # columns: Activator | Park | Park Name | Freq | Mode | Spotted | Comments
+        # POTA API returns frequency in kHz (e.g. 14225 = 14.225 MHz)
         freq_str = self._pota_tree.item(sel[0], "values")[3]
         try:
-            freq_hz = int(float(freq_str) * 1_000_000)
+            freq_khz = float(freq_str)
+            freq_hz = int(freq_khz * 1_000)
+            freq_mhz_disp = f"{freq_khz / 1000:.4f}"
         except (ValueError, TypeError):
             return
         host = self.cfg["flrig_host"]
         port = self.cfg["flrig_port"]
-        self._pota_status_lbl.config(text=f"Tuning to {freq_str} MHz…", fg=FG2)
+        self._pota_status_lbl.config(text=f"Tuning to {freq_mhz_disp} MHz…", fg=FG2)
 
         def _tune():
             result = flrig_set_freq(host, port, freq_hz)
             if result is True:
-                msg = f"Tuned → {freq_str} MHz"
+                msg = f"Tuned → {freq_mhz_disp} MHz"
                 fg  = ACC3
                 self._tune_suppress_until = time.monotonic() + 3.0
                 self.after(0, lambda: self._update_vfo_display(freq_hz, self._flrig_mode, force=True))
