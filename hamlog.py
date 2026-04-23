@@ -291,7 +291,7 @@ DARK_PALETTE = {
     "SEL": "#2d3a52",
     "MAP_BG": "#0a0e17", "MAP_GRID": "#151c28", "MAP_GRID2": "#2a3347",
     "MAP_COAST": "#1e3a5f", "MAP_GLOW": "#5a3010",
-    "POTA_TUNED": "#1e5c28", "POTA_WORKED": "#1a3566",
+    "POTA_TUNED": "#4d3800", "POTA_WORKED": "#1e5c28",
 }
 LIGHT_PALETTE = {
     "BG": "#f5f7fa", "BG2": "#eaecf2", "BG3": "#dde1ea", "BG4": "#ced3df",
@@ -300,7 +300,7 @@ LIGHT_PALETTE = {
     "SEL": "#b3c9e8",
     "MAP_BG": "#d0dce8", "MAP_GRID": "#b0c4d8", "MAP_GRID2": "#8aaac8",
     "MAP_COAST": "#4a7ab0", "MAP_GLOW": "#d4a040",
-    "POTA_TUNED": "#90eea8", "POTA_WORKED": "#90c4f8",
+    "POTA_TUNED": "#ffe8a0", "POTA_WORKED": "#90eea8",
 }
 
 def _apply_palette(name="dark"):
@@ -903,8 +903,8 @@ class HamLog(tk.Tk):
 
         self._pota_tree.tag_configure("odd",    background=BG2)
         self._pota_tree.tag_configure("even",   background=BG3)
-        self._pota_tree.tag_configure("tuned",  background=POTA_TUNED)
-        self._pota_tree.tag_configure("worked", background=POTA_WORKED)
+        self._pota_tree.tag_configure("tuned",  background=POTA_TUNED,  foreground=ACCENT)
+        self._pota_tree.tag_configure("worked", background=POTA_WORKED, foreground=ACC3)
         self._pota_tree.bind("<<TreeviewSelect>>", self._on_pota_spot_select)
 
     def _on_tab_changed(self, _=None):
@@ -1041,8 +1041,8 @@ class HamLog(tk.Tk):
     def _refresh_pota_highlights(self):
         try:
             rows = self.conn.execute(
-                "SELECT DISTINCT UPPER(call) FROM qso").fetchall()
-            worked = {r[0] for r in rows}
+                "SELECT DISTINCT UPPER(TRIM(call)) FROM qso").fetchall()
+            worked = {r[0] for r in rows if r[0]}
         except Exception:
             worked = set()
         # Prefer live VFO from flrig; fall back to last-clicked spot when offline
@@ -1050,7 +1050,7 @@ class HamLog(tk.Tk):
         TOLERANCE_HZ = 2000  # ±2 kHz
         for i, iid in enumerate(self._pota_tree.get_children()):
             vals = self._pota_tree.item(iid, "values")
-            activator = str(vals[0]).upper()
+            activator = str(vals[0]).strip().upper()
             base = "even" if i % 2 == 0 else "odd"
             if activator in worked:
                 self._pota_tree.item(iid, tags=(base, "worked"))
