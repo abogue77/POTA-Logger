@@ -713,9 +713,9 @@ class POTAHunter(tk.Tk):
         tab2 = tk.Frame(self._nb, bg=BG)
         tab3 = tk.Frame(self._nb, bg=MAP_BG)
 
+        self._nb.add(tab3, text="  POTA Spots  ")
         self._nb.add(tab1, text="  QSO Log  ")
         self._nb.add(tab2, text="  Grid Map  ")
-        self._nb.add(tab3, text="  POTA Spots  ")
 
         self._build_tab_log(tab1)
         self._build_tab_map(tab2)
