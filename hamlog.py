@@ -1164,6 +1164,7 @@ class POTAHunter(tk.Tk):
         self._pota_clicked_hz = freq_hz
         self._tune_suppress_until = time.monotonic() + 4.0
         self._refresh_pota_highlights()
+        self._pota_tree.selection_set([])
         host = self.cfg["flrig_host"]
         port = self.cfg["flrig_port"]
         self._pota_status_lbl.config(text=f"Tuning to {freq_mhz_disp} MHz…", fg=FG2)
