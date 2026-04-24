@@ -291,7 +291,7 @@ def adif_to_row_dict(d):
         "rst_rcvd":   d.get("RST_RCVD","59"),
         "name":       d.get("NAME",""),
         "qth":        d.get("QTH",""),
-        "gridsquare": d.get("GRIDSQUARE",""),
+        "gridsquare": d.get("GRIDSQUARE","") or d.get("GRID",""),
         "park_nr":    d.get("POTA_REF",""),
         "comment":    d.get("COMMENT",""),
         "notes":      d.get("NOTES",""),
@@ -929,8 +929,9 @@ class POTAHunter(tk.Tk):
             )
 
         n = len(rows)
+        total_qsos = sum(r["cnt"] for r in rows)
         self._map_count_lbl.config(
-            text=f"{n} grid square{'s' if n != 1 else ''} contacted")
+            text=f"{n} grid square{'s' if n != 1 else ''} ({total_qsos} QSO{'s' if total_qsos != 1 else ''})")
 
     def _on_map_motion(self, event):
         canvas = self._map_canvas
@@ -1532,9 +1533,8 @@ class POTAHunter(tk.Tk):
                 tags=(tag,))
         n = len(rows)
         self._qso_count_lbl.config(text=f"{n} QSO{'s' if n!=1 else ''}")
-        # Refresh map markers if map has been drawn
-        if self._map_drawn:
-            self._refresh_map()
+        # Always attempt a map refresh; _refresh_map guards internally
+        self._refresh_map()
 
     def _apply_filter(self):
         q    = self._search_var.get().strip()
