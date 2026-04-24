@@ -20,6 +20,7 @@ import urllib.parse
 import xml.etree.ElementTree as ET
 import threading
 import datetime
+import time
 import os
 import re
 import json
@@ -40,6 +41,7 @@ DEFAULT_CONFIG = {
     "flrig_host": "127.0.0.1",
     "flrig_port": 12345,
     "last_logbook": "",
+    "theme":      "dark",
 }
 
 def load_config():
@@ -211,22 +213,38 @@ def freq_to_band(freq_mhz):
     return ""
 
 # ── Flrig ─────────────────────────────────────────────────────────────────────
+class _TimeoutTransport(xmlrpc.client.Transport):
+    """XML-RPC transport with a configurable connection/read timeout."""
+    def __init__(self, timeout=2.0):
+        super().__init__()
+        self._timeout = timeout
+
+    def make_connection(self, host):
+        conn = super().make_connection(host)
+        conn.timeout = self._timeout
+        return conn
+
 def flrig_get(host, port):
     try:
         proxy = xmlrpc.client.ServerProxy(
-            f"http://{host}:{port}/RPC2", allow_none=True)
+            f"http://{host}:{port}/RPC2",
+            transport=_TimeoutTransport(timeout=2.0),
+            allow_none=True)
         return proxy.rig.get_vfo(), proxy.rig.get_mode()
     except Exception:
         return None, None
 
 def flrig_set_freq(host, port, freq_hz):
+    """Returns True on success or an error string on failure."""
     try:
         proxy = xmlrpc.client.ServerProxy(
-            f"http://{host}:{port}/RPC2", allow_none=True)
-        proxy.rig.set_vfo(int(freq_hz))
+            f"http://{host}:{port}/RPC2",
+            transport=_TimeoutTransport(timeout=5.0),
+            allow_none=True)
+        proxy.rig.set_vfo(float(freq_hz))
         return True
-    except Exception:
-        return False
+    except Exception as e:
+        return str(e)
 
 # ── QRZ ───────────────────────────────────────────────────────────────────────
 _qrz_session = None
@@ -265,19 +283,32 @@ def qrz_lookup(call):
     except Exception:
         return None
 
-# ── Palette ───────────────────────────────────────────────────────────────────
-BG     = "#111318"
-BG2    = "#1a1d24"
-BG3    = "#22262f"
-BG4    = "#2a2f3a"
-ACCENT = "#e8a020"
-ACC2   = "#4fc3f7"
-ACC3   = "#81c995"
-WARN   = "#f28b82"
-MUTED  = "#555e6e"
-FG     = "#dde3ee"
-FG2    = "#8c95a6"
-SEL    = "#2d3a52"
+# ── Palettes ──────────────────────────────────────────────────────────────────
+DARK_PALETTE = {
+    "BG": "#111318", "BG2": "#1a1d24", "BG3": "#22262f", "BG4": "#2a2f3a",
+    "ACCENT": "#e8a020", "ACC2": "#4fc3f7", "ACC3": "#81c995",
+    "WARN": "#f28b82", "MUTED": "#555e6e", "FG": "#dde3ee", "FG2": "#8c95a6",
+    "SEL": "#2d3a52",
+    "MAP_BG": "#0a0e17", "MAP_GRID": "#151c28", "MAP_GRID2": "#2a3347",
+    "MAP_COAST": "#1e3a5f", "MAP_GLOW": "#5a3010",
+    "POTA_TUNED": "#0077ff", "POTA_WORKED": "#00cc44",
+}
+LIGHT_PALETTE = {
+    "BG": "#f5f7fa", "BG2": "#eaecf2", "BG3": "#dde1ea", "BG4": "#ced3df",
+    "ACCENT": "#b07800", "ACC2": "#0066aa", "ACC3": "#2a7a30",
+    "WARN": "#cc2222", "MUTED": "#7a8599", "FG": "#1a1d24", "FG2": "#4a5568",
+    "SEL": "#b3c9e8",
+    "MAP_BG": "#d0dce8", "MAP_GRID": "#b0c4d8", "MAP_GRID2": "#8aaac8",
+    "MAP_COAST": "#4a7ab0", "MAP_GLOW": "#d4a040",
+    "POTA_TUNED": "#5588ff", "POTA_WORKED": "#00cc55",
+}
+
+def _apply_palette(name="dark"):
+    g = globals()
+    for k, v in (LIGHT_PALETTE if name == "light" else DARK_PALETTE).items():
+        g[k] = v
+
+_apply_palette("dark")  # defaults; entry point overrides with saved preference
 
 MONO  = ("Courier New", 10)
 DISP  = ("Courier New", 22, "bold")
@@ -410,12 +441,15 @@ class HamLog(tk.Tk):
         self._flrig_freq_hz = None
         self._flrig_mode    = None
         self._flrig_poll_id = None
-        self._pota_paused   = False
-        self._pota_loaded   = False
-        self._pota_after_id = None
+        self._tune_suppress_until = 0.0
+        self._pota_paused    = False
+        self._pota_loaded    = False
+        self._pota_after_id  = None
         self._pota_spots_raw = []
         self._pota_band_var  = tk.StringVar(value="All")
+        self._pota_mode_var  = tk.StringVar(value="All")
         self._pota_hide_qrt  = tk.BooleanVar(value=False)
+        self._pota_clicked_hz = None
         self._map_markers   = {}
         self._map_drawn     = False
         self._map_resize_id = None
@@ -443,8 +477,15 @@ class HamLog(tk.Tk):
                     fieldbackground=BG2, rowheight=22, font=MONO)
         s.configure("Treeview.Heading", background=BG3, foreground=ACCENT,
                     font=LBL, relief="flat")
-        s.map("Treeview", background=[("selected",SEL)],
-                          foreground=[("selected",ACC2)])
+        # The clam theme (and Windows visual styles) inject a
+        # ("!disabled", "!selected") map entry that overrides tag backgrounds
+        # for all normal rows.  Strip it so tag_configure colours show through.
+        def _strip(opt):
+            return [e for e in s.map("Treeview", query_opt=opt)
+                    if e[:2] != ("!disabled", "!selected")]
+        s.map("Treeview",
+              background=_strip("background") + [("selected", SEL)],
+              foreground=_strip("foreground") + [("selected", ACC2)])
         s.configure("TCombobox", fieldbackground=BG3, background=BG3,
                     foreground=FG, arrowcolor=ACCENT)
         s.map("TCombobox", fieldbackground=[("readonly",BG3)],
@@ -478,6 +519,11 @@ class HamLog(tk.Tk):
         sm.add_command(label="Station Settings…", command=self._station_settings)
         sm.add_command(label="QRZ Login…",        command=self._qrz_settings)
         sm.add_command(label="Flrig Settings…",   command=self._flrig_settings)
+        sm.add_separator()
+        theme_label = ("☀ Switch to Light Mode"
+                       if self.cfg.get("theme", "dark") == "dark"
+                       else "☾ Switch to Dark Mode")
+        sm.add_command(label=theme_label, command=self._switch_theme)
         hm = menu("Help")
         hm.add_command(label="About", command=self._about)
 
@@ -528,7 +574,7 @@ class HamLog(tk.Tk):
 
         tab1 = tk.Frame(self._nb, bg=BG)
         tab2 = tk.Frame(self._nb, bg=BG)
-        tab3 = tk.Frame(self._nb, bg="#0a0e17")
+        tab3 = tk.Frame(self._nb, bg=MAP_BG)
 
         self._nb.add(tab1, text="  QSO Log  ")
         self._nb.add(tab2, text="  Grid Map  ")
@@ -559,7 +605,12 @@ class HamLog(tk.Tk):
         srch.pack(fill="x", padx=4, pady=(4,4))
         tk.Label(srch, text="SEARCH:", bg=BG, fg=FG2, font=LBL).pack(side="left")
         self._search_var = tk.StringVar()
-        self._search_var.trace_add("write", lambda *_: self._apply_filter())
+        self._search_after_id = None
+        def _debounced_filter(*_):
+            if self._search_after_id:
+                self.after_cancel(self._search_after_id)
+            self._search_after_id = self.after(150, self._apply_filter)
+        self._search_var.trace_add("write", _debounced_filter)
         tk.Entry(srch, textvariable=self._search_var, bg=BG3, fg=FG,
                  font=MONO, relief="flat", insertbackground=ACCENT, bd=4,
                  width=26).pack(side="left", padx=4)
@@ -600,16 +651,14 @@ class HamLog(tk.Tk):
         vsb.grid(row=0,column=1,sticky="ns")
         hsb.grid(row=1,column=0,sticky="ew")
         tbl.rowconfigure(0,weight=1); tbl.columnconfigure(0,weight=1)
-        self._tree.tag_configure("odd",  background=BG2)
-        self._tree.tag_configure("even", background=BG3)
+        self._tree.tag_configure("odd",  background=BG2, foreground=FG)
+        self._tree.tag_configure("even", background=BG3, foreground=FG)
         self._tree.bind("<<TreeviewSelect>>", self._on_qso_select)
         self._tree.bind("<Double-1>",         self._edit_qso)
         self._tree.bind("<Delete>",    lambda _: self._delete_qso())
 
     # ── Tab 2: Grid Map ───────────────────────────────────────────────────
     def _build_tab_map(self, parent):
-        MAP_BG = "#0a0e17"
-
         # Toolbar
         tb = tk.Frame(parent, bg=MAP_BG)
         tb.pack(fill="x", padx=6, pady=(4,2))
@@ -651,7 +700,6 @@ class HamLog(tk.Tk):
         if W < 10 or H < 10:
             return
         canvas.delete("all")
-        MAP_BG = "#0a0e17"
 
         def px(lon, lat):
             x = (lon + 180) / 360 * W
@@ -662,22 +710,22 @@ class HamLog(tk.Tk):
         for i in range(19):
             lon = -180 + i * 20
             x, _ = px(lon, 0)
-            canvas.create_line(x, 0, x, H, fill="#151c28", width=1, tags="static")
+            canvas.create_line(x, 0, x, H, fill=MAP_GRID, width=1, tags="static")
         for j in range(19):
             lat = 90 - j * 10
             _, y = px(0, lat)
-            canvas.create_line(0, y, W, y, fill="#151c28", width=1, tags="static")
+            canvas.create_line(0, y, W, y, fill=MAP_GRID, width=1, tags="static")
 
         # Field column labels (A–R) along top
         for i in range(18):
             x, _ = px(-180 + i * 20 + 10, 0)
             canvas.create_text(x, 10, text=chr(ord('A') + i),
-                               fill="#2a3347", font=("Courier New", 7), tags="static")
+                               fill=MAP_GRID2, font=("Courier New", 7), tags="static")
         # Field row labels (R–A top to bottom) along left
         for j in range(18):
             _, y = px(0, 90 - j * 10 - 5)
             canvas.create_text(8, y, text=chr(ord('A') + 17 - j),
-                               fill="#2a3347", font=("Courier New", 7), tags="static")
+                               fill=MAP_GRID2, font=("Courier New", 7), tags="static")
 
         # World outline
         for poly in WORLD_OUTLINE:
@@ -688,7 +736,7 @@ class HamLog(tk.Tk):
                 x, y = px(lon, lat)
                 pts.extend((x, y))
             if len(pts) >= 4:
-                canvas.create_line(pts, fill="#1e3a5f", width=1, tags="static")
+                canvas.create_line(pts, fill=MAP_COAST, width=1, tags="static")
 
         self._map_drawn = True
         self._draw_map_markers(W, H)
@@ -729,7 +777,7 @@ class HamLog(tk.Tk):
             cnt = row["cnt"]
             # Glow
             canvas.create_rectangle(x-7, y-5, x+7, y+5,
-                                    fill="#5a3010", outline="", tags="marker")
+                                    fill=MAP_GLOW, outline="", tags="marker")
             # Marker
             canvas.create_rectangle(x-5, y-3, x+5, y+3,
                                     fill=ACCENT, outline="", tags="marker")
@@ -805,7 +853,7 @@ class HamLog(tk.Tk):
 
     # ── Tab 3: POTA Spots ─────────────────────────────────────────────────
     def _build_tab_pota(self, parent):
-        PBGK = "#0a0e17"
+        PBGK = MAP_BG
 
         # Toolbar
         tb = tk.Frame(parent, bg=PBGK)
@@ -819,6 +867,12 @@ class HamLog(tk.Tk):
             values=["All"], width=6, state="readonly", font=SM)
         self._pota_band_cb.pack(side="left")
         self._pota_band_cb.bind("<<ComboboxSelected>>", lambda _: self._apply_pota_filters())
+        tk.Label(tb, text="Mode:", bg=PBGK, fg=FG2, font=SM).pack(side="left", padx=(8, 2))
+        self._pota_mode_cb = ttk.Combobox(
+            tb, textvariable=self._pota_mode_var,
+            values=["All"], width=7, state="readonly", font=SM)
+        self._pota_mode_cb.pack(side="left")
+        self._pota_mode_cb.bind("<<ComboboxSelected>>", lambda _: self._apply_pota_filters())
         ttk.Checkbutton(
             tb, text="Hide QRT", variable=self._pota_hide_qrt,
             command=self._apply_pota_filters).pack(side="left", padx=(10, 0))
@@ -854,8 +908,10 @@ class HamLog(tk.Tk):
         frm.rowconfigure(0, weight=1)
         frm.columnconfigure(0, weight=1)
 
-        self._pota_tree.tag_configure("odd",  background=BG2)
-        self._pota_tree.tag_configure("even", background=BG3)
+        self._pota_tree.tag_configure("odd",    background=BG2, foreground=FG)
+        self._pota_tree.tag_configure("even",   background=BG3, foreground=FG)
+        self._pota_tree.tag_configure("tuned",  background=POTA_TUNED,  foreground="#000000")
+        self._pota_tree.tag_configure("worked", background=POTA_WORKED, foreground="#000000", font=("Courier New", 10, "bold"))
         self._pota_tree.bind("<<TreeviewSelect>>", self._on_pota_spot_select)
 
     def _on_tab_changed(self, _=None):
@@ -895,10 +951,15 @@ class HamLog(tk.Tk):
         if band_sel and band_sel != "All":
             def _mhz(s):
                 try:
-                    return float(s.get("frequency", s.get("freq", 0)) or 0)
+                    return float(s.get("frequency", s.get("freq", 0)) or 0) / 1000
                 except Exception:
                     return 0.0
             spots = [s for s in spots if freq_to_band(_mhz(s)) == band_sel]
+
+        mode_sel = self._pota_mode_var.get()
+        if mode_sel and mode_sel != "All":
+            spots = [s for s in spots
+                     if str(s.get("mode", "")).upper() == mode_sel.upper()]
 
         if self._pota_hide_qrt.get():
             spots = [s for s in spots
@@ -906,10 +967,17 @@ class HamLog(tk.Tk):
                          s.get("comments", s.get("comment", ""))).lower()]
 
         all_bands = sorted({
-            freq_to_band(float(s.get("frequency", s.get("freq", 0)) or 0))
+            freq_to_band(float(s.get("frequency", s.get("freq", 0)) or 0) / 1000)
             for s in self._pota_spots_raw
         } - {""})
         self._pota_band_cb["values"] = ["All"] + all_bands
+
+        all_modes = sorted({
+            str(s.get("mode", "")).upper()
+            for s in self._pota_spots_raw
+            if s.get("mode", "")
+        })
+        self._pota_mode_cb["values"] = ["All"] + all_modes
 
         self._populate_pota_table(spots)
 
@@ -918,43 +986,98 @@ class HamLog(tk.Tk):
         if not sel:
             return
         # columns: Activator | Park | Park Name | Freq | Mode | Spotted | Comments
-        freq_str = self._pota_tree.item(sel[0], "values")[3]
+        values = self._pota_tree.item(sel[0], "values")
+        activator = values[0]
+        park      = values[1]
+        freq_str  = values[3]
+
+        # Populate QSO entry fields
+        self.e_call.delete(0, "end")
+        self.e_call.insert(0, activator.upper())
+        self.e_park.delete(0, "end")
+        self.e_park.insert(0, park)
+
+        # Tune radio — POTA API returns frequency in kHz (e.g. 14225 = 14.225 MHz)
         try:
-            freq_hz = int(float(freq_str) * 1_000_000)
+            freq_khz = float(freq_str)
+            freq_hz = int(freq_khz * 1_000)
+            freq_mhz_disp = f"{freq_khz / 1000:.4f}"
         except (ValueError, TypeError):
             return
+
+        # Immediately highlight this row and suppress the flrig poll
+        # from overwriting it before the tune command completes.
+        self._pota_clicked_hz = freq_hz
+        self._tune_suppress_until = time.monotonic() + 4.0
+        self._refresh_pota_highlights()
         host = self.cfg["flrig_host"]
         port = self.cfg["flrig_port"]
-        self._pota_status_lbl.config(text=f"Tuning to {freq_str} MHz…", fg=FG2)
+        self._pota_status_lbl.config(text=f"Tuning to {freq_mhz_disp} MHz…", fg=FG2)
 
         def _tune():
-            ok = flrig_set_freq(host, port, freq_hz)
-            msg = f"Tuned → {freq_str} MHz" if ok else "Tune failed (Flrig offline?)"
-            fg  = ACC3 if ok else WARN
+            result = flrig_set_freq(host, port, freq_hz)
+            if result is True:
+                msg = f"Tuned → {freq_mhz_disp} MHz"
+                fg  = ACC3
+                self._tune_suppress_until = time.monotonic() + 3.0
+                self.after(0, lambda: self._update_vfo_display(freq_hz, self._flrig_mode, force=True))
+            else:
+                msg = f"Tune failed: {result}"
+                fg  = WARN
             self.after(0, lambda: self._pota_status_lbl.config(text=msg, fg=fg))
 
         threading.Thread(target=_tune, daemon=True).start()
 
     def _populate_pota_table(self, spots):
         self._pota_tree.delete(*self._pota_tree.get_children())
-        for i, s in enumerate(spots):
+        for s in spots:
             act   = s.get("activator",  s.get("activatorCallsign", ""))
             park  = s.get("reference",  s.get("parkReference", ""))
             pname = s.get("name",       s.get("parkName", ""))
             freq  = s.get("frequency",  s.get("freq", ""))
             mode  = s.get("mode", "")
             stime = s.get("spotTime",   s.get("timestamp", ""))
-            # Trim the spotTime to just HH:MM if it's a full datetime
             if stime and "T" in str(stime):
                 stime = str(stime).split("T")[1][:5] + "z"
             cmts  = s.get("comments",   s.get("comment", ""))
-            tag   = "even" if i % 2 == 0 else "odd"
             self._pota_tree.insert("", "end",
-                values=(act, park, pname, freq, mode, stime, cmts),
-                tags=(tag,))
+                values=(act, park, pname, freq, mode, stime, cmts))
+        self._refresh_pota_highlights()
         now = datetime.datetime.utcnow().strftime("%H:%M:%Sz")
         self._pota_status_lbl.config(
             text=f"● {len(spots)} activators  last updated {now}", fg=ACC3)
+
+    def _refresh_pota_highlights(self):
+        try:
+            rows = self.conn.execute(
+                "SELECT DISTINCT UPPER(TRIM(call)) FROM qso").fetchall()
+            worked = {r[0] for r in rows if r[0]}
+        except Exception:
+            worked = set()
+        # During the suppress window (user just clicked a spot) always use the
+        # clicked frequency so the flrig poll can't overwrite the highlight
+        # before the tune command finishes.  Outside that window, prefer the
+        # live VFO; fall back to the last-clicked spot when flrig is offline.
+        if time.monotonic() < self._tune_suppress_until and self._pota_clicked_hz:
+            vfo_hz = self._pota_clicked_hz
+        else:
+            vfo_hz = self._flrig_freq_hz if self._flrig_freq_hz is not None else self._pota_clicked_hz
+        for i, iid in enumerate(self._pota_tree.get_children()):
+            vals = self._pota_tree.item(iid, "values")
+            activator = str(vals[0]).strip().upper()
+            base = "even" if i % 2 == 0 else "odd"
+            if activator in worked:
+                self._pota_tree.item(iid, tags=("worked",))
+                continue
+            if vfo_hz is not None:
+                try:
+                    spot_hz = int(float(vals[3]) * 1000)  # kHz → Hz, exact
+                    if spot_hz == int(vfo_hz):
+                        self._pota_tree.item(iid, tags=("tuned",))
+                        continue
+                except (ValueError, TypeError):
+                    pass
+            self._pota_tree.item(iid, tags=(base,))
 
     def _auto_refresh_pota(self):
         if self._pota_paused:
@@ -1001,24 +1124,29 @@ class HamLog(tk.Tk):
 
         self.e_call = tk.Entry(f, width=11, **ent)
         self.e_call.bind("<FocusOut>", self._on_call_focusout)
-        self.e_call.bind("<Return>",   self._on_call_focusout)
+        self.e_call.bind("<Return>",   self._log_qso)
         self.e_call.grid(row=1, column=0, padx=(0,4), sticky="w")
 
         self.e_rst_s = tk.Entry(f, width=5, **ent)
         self.e_rst_s.insert(0,"59")
+        self.e_rst_s.bind("<Return>", self._log_qso)
         self.e_rst_s.grid(row=1, column=1, padx=(10,4), sticky="w")
 
         self.e_rst_r = tk.Entry(f, width=5, **ent)
         self.e_rst_r.insert(0,"59")
+        self.e_rst_r.bind("<Return>", self._log_qso)
         self.e_rst_r.grid(row=1, column=2, padx=(10,4), sticky="w")
 
         self.e_park = tk.Entry(f, width=11, **ent)
+        self.e_park.bind("<Return>", self._log_qso)
         self.e_park.grid(row=1, column=3, padx=(10,4), sticky="w")
 
         self.e_comment = tk.Entry(f, width=22, **ent)
+        self.e_comment.bind("<Return>", self._log_qso)
         self.e_comment.grid(row=1, column=4, padx=(10,4), sticky="ew")
 
         self.e_notes = tk.Entry(f, width=22, **ent)
+        self.e_notes.bind("<Return>", self._log_qso)
         self.e_notes.grid(row=1, column=5, padx=(10,4), sticky="ew")
 
         info_row = tk.Frame(parent, bg=BG)
@@ -1071,7 +1199,7 @@ class HamLog(tk.Tk):
         self.e_call.focus_set()
 
     # ── Log QSO ───────────────────────────────────────────────────────────
-    def _log_qso(self):
+    def _log_qso(self, _=None):
         if not self.adif_path:
             messagebox.showwarning("No Logbook", "Open or create a logbook first.")
             return
@@ -1084,16 +1212,7 @@ class HamLog(tk.Tk):
         date_str = now.strftime("%Y-%m-%d")
         time_str = now.strftime("%H%M")
 
-        freq_hz, rig_mode = flrig_get(self.cfg["flrig_host"],
-                                       self.cfg["flrig_port"])
-        if freq_hz is not None:
-            try:
-                freq_mhz = float(freq_hz) / 1_000_000
-            except Exception:
-                freq_mhz = float(freq_hz)
-            band = freq_to_band(freq_mhz)
-            mode = str(rig_mode).upper() if rig_mode else ""
-        elif self._flrig_freq_hz is not None:
+        if self._flrig_freq_hz is not None:
             try:
                 freq_mhz = float(self._flrig_freq_hz) / 1_000_000
             except Exception:
@@ -1140,6 +1259,7 @@ class HamLog(tk.Tk):
         self._rig_snap_lbl.config(text=snap, fg=ACC3)
         self._set_status(f"Logged ✔  {call}  {date_str} {time_str}z  {freq_disp}  {band}  {mode}")
         self._reload_table()
+        self._refresh_pota_highlights()
         self._clear_form()
 
     # ── Table ─────────────────────────────────────────────────────────────
@@ -1330,31 +1450,95 @@ class HamLog(tk.Tk):
     def _qrz_settings(self):     QRZDialog(self, self.cfg)
     def _flrig_settings(self):   FlrigDialog(self, self.cfg)
 
+    def _switch_theme(self):
+        current = self.cfg.get("theme", "dark")
+        self.cfg["theme"] = "light" if current == "dark" else "dark"
+        save_config(self.cfg)
+        _apply_palette(self.cfg["theme"])
+        self._rebuild_ui()
+
+    def _rebuild_ui(self):
+        for attr in ("_flrig_poll_id", "_pota_after_id", "_map_resize_id"):
+            id_ = getattr(self, attr, None)
+            if id_:
+                self.after_cancel(id_)
+        if getattr(self, "_search_after_id", None):
+            self.after_cancel(self._search_after_id)
+
+        adif_path = self.adif_path
+
+        for w in self.winfo_children():
+            w.destroy()
+
+        self.configure(bg=BG)
+        self._flrig_freq_hz  = None
+        self._flrig_mode     = None
+        self._flrig_poll_id  = None
+        self._flrig_polling  = False
+        self._tune_suppress_until = 0.0
+        self._pota_paused    = False
+        self._pota_loaded    = False
+        self._pota_after_id  = None
+        self._pota_spots_raw = []
+        self._pota_band_var  = tk.StringVar(value="All")
+        self._pota_mode_var  = tk.StringVar(value="All")
+        self._pota_hide_qrt  = tk.BooleanVar(value=False)
+        self._pota_clicked_hz = None
+        self._map_markers    = {}
+        self._map_drawn      = False
+        self._map_resize_id  = None
+        self.adif_path       = ""
+
+        self._style_ttk()
+        self._build_menu()
+        self._build_ui()
+
+        if adif_path and os.path.exists(adif_path):
+            self._open_adif(adif_path)
+
+        if _qrz_session:
+            self._qrz_lbl.config(text="QRZ: ✔", fg=ACC3)
+
+        self._start_flrig_poll()
+
     # ── Flrig poll ────────────────────────────────────────────────────────
     def _start_flrig_poll(self):
+        self._flrig_polling = False
         self._do_flrig_poll()
 
     def _do_flrig_poll(self):
-        freq_hz, mode = flrig_get(self.cfg["flrig_host"],
-                                   self.cfg["flrig_port"])
+        if not self._flrig_polling:
+            self._flrig_polling = True
+            host = self.cfg["flrig_host"]
+            port = self.cfg["flrig_port"]
+            def _fetch():
+                freq_hz, mode = flrig_get(host, port)
+                self._flrig_polling = False
+                self.after(0, lambda: self._update_vfo_display(freq_hz, mode))
+            threading.Thread(target=_fetch, daemon=True).start()
+        self._flrig_poll_id = self.after(2000, self._do_flrig_poll)
+
+    def _update_vfo_display(self, freq_hz, mode, force=False):
+        suppressed = not force and time.monotonic() < self._tune_suppress_until
         if freq_hz is not None:
-            self._flrig_freq_hz = freq_hz
-            self._flrig_mode    = mode
-            try:
-                mhz = float(freq_hz) / 1_000_000
-            except Exception:
-                mhz = float(freq_hz)
-            band = freq_to_band(mhz)
-            self._vfo_freq.config(text=f"{mhz:.4f} MHz", fg=ACCENT)
-            self._vfo_mode.config(text=str(mode) if mode else "—", fg=ACC2)
-            self._vfo_band.config(text=band if band else "—", fg=ACC3)
+            if not suppressed:
+                self._flrig_freq_hz = freq_hz
+                self._flrig_mode    = mode
+                try:
+                    mhz = float(freq_hz) / 1_000_000
+                except Exception:
+                    mhz = float(freq_hz)
+                band = freq_to_band(mhz)
+                self._vfo_freq.config(text=f"{mhz:.4f} MHz", fg=ACCENT)
+                self._vfo_mode.config(text=str(mode) if mode else "—", fg=ACC2)
+                self._vfo_band.config(text=band if band else "—", fg=ACC3)
+                self._refresh_pota_highlights()
             self._flrig_lbl.config(text="● Flrig: online", fg=ACC3)
         else:
             self._vfo_freq.config(text="—", fg=MUTED)
             self._vfo_mode.config(text="—", fg=MUTED)
             self._vfo_band.config(text="—", fg=MUTED)
             self._flrig_lbl.config(text="● Flrig: offline", fg=WARN)
-        self._flrig_poll_id = self.after(2000, self._do_flrig_poll)
 
     # ── QRZ ───────────────────────────────────────────────────────────────
     def _qrz_login_bg(self):
@@ -1583,5 +1767,6 @@ class FlrigDialog(tk.Toplevel):
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 if __name__ == "__main__":
+    _apply_palette(load_config().get("theme", "dark"))
     app = HamLog()
     app.mainloop()
