@@ -568,6 +568,8 @@ class POTAHunter(tk.Tk):
         self.cfg           = load_config()
         self.conn          = make_index()
         self.adif_path     = ""
+        self._map_poll_id    = None
+        self._map_adif_mtime = None
         self._flrig_freq_hz = None
         self._flrig_mode    = None
         self._flrig_poll_id = None
@@ -893,31 +895,47 @@ class POTAHunter(tk.Tk):
             return
         self._draw_map_markers(W, H)
 
+    def _read_adif_grids(self):
+        """Read the active ADIF log file and return grouped grid square data."""
+        if not self.adif_path or not os.path.exists(self.adif_path):
+            return []
+        try:
+            with open(self.adif_path, "r", encoding="utf-8", errors="replace") as f:
+                text = f.read()
+        except OSError:
+            return []
+        records = parse_adif_records(text)
+        groups = {}
+        for rec in records:
+            raw_gs = (rec.get("GRIDSQUARE", "") or rec.get("GRID", "")).strip().upper()[:4]
+            if len(raw_gs) < 4:
+                continue
+            call = rec.get("CALL", "").strip()
+            if raw_gs not in groups:
+                groups[raw_gs] = {"calls": [], "cnt": 0}
+            groups[raw_gs]["cnt"] += 1
+            if call and call not in groups[raw_gs]["calls"]:
+                groups[raw_gs]["calls"].append(call)
+        return [{"gs": gs, "calls": ", ".join(v["calls"]), "cnt": v["cnt"]}
+                for gs, v in groups.items()]
+
     def _draw_map_markers(self, W, H):
         canvas = self._map_canvas
         canvas.delete("marker")
         self._map_markers = {}
 
-        rows = self.conn.execute(
-            "SELECT gridsquare, GROUP_CONCAT(call, ', ') AS calls, COUNT(*) AS cnt "
-            "FROM qso WHERE gridsquare IS NOT NULL AND gridsquare != '' "
-            "GROUP BY UPPER(SUBSTR(gridsquare,1,4))"
-        ).fetchall()
+        rows = self._read_adif_grids()
 
         for row in rows:
-            gs = (row["gridsquare"] or "").strip().upper()[:4]
-            if len(gs) < 4:
-                continue
+            gs = row["gs"]
             lat, lon = grid_to_latlon(gs)
             if lat is None:
                 continue
             x = (lon + 180) / 360 * W
             y = (90 - lat) / 180 * H
             cnt = row["cnt"]
-            # Glow
             canvas.create_rectangle(x-7, y-5, x+7, y+5,
                                     fill=MAP_GLOW, outline="", tags="marker")
-            # Marker
             canvas.create_rectangle(x-5, y-3, x+5, y+3,
                                     fill=ACCENT, outline="", tags="marker")
             if cnt > 1:
@@ -951,17 +969,11 @@ class POTAHunter(tk.Tk):
             self._map_tooltip.place_forget()
 
     def _open_leaflet_map(self):
-        rows = self.conn.execute(
-            "SELECT gridsquare, GROUP_CONCAT(call, ', ') AS calls, COUNT(*) AS cnt "
-            "FROM qso WHERE gridsquare IS NOT NULL AND gridsquare != '' "
-            "GROUP BY UPPER(SUBSTR(gridsquare,1,4))"
-        ).fetchall()
+        rows = self._read_adif_grids()
 
         markers_js = []
         for row in rows:
-            gs = (row["gridsquare"] or "").strip().upper()[:4]
-            if len(gs) < 4:
-                continue
+            gs = row["gs"]
             lat, lon = grid_to_latlon(gs)
             if lat is None:
                 continue
@@ -990,6 +1002,25 @@ class POTAHunter(tk.Tk):
         with open(tmp, "w", encoding="utf-8") as f:
             f.write(html)
         webbrowser.open(tmp)
+
+    def _start_map_poll(self):
+        self._stop_map_poll()
+        self._do_map_poll()
+
+    def _do_map_poll(self):
+        try:
+            mtime = os.path.getmtime(self.adif_path) if self.adif_path and os.path.exists(self.adif_path) else None
+        except OSError:
+            mtime = None
+        if mtime != self._map_adif_mtime:
+            self._map_adif_mtime = mtime
+            self._refresh_map()
+        self._map_poll_id = self.after(5000, self._do_map_poll)
+
+    def _stop_map_poll(self):
+        if self._map_poll_id:
+            self.after_cancel(self._map_poll_id)
+            self._map_poll_id = None
 
     # ── Tab 3: POTA Spots ─────────────────────────────────────────────────
     def _build_tab_pota(self, parent):
@@ -1076,8 +1107,10 @@ class POTAHunter(tk.Tk):
         except Exception:
             return
         if tab == "Grid Map":
-            self.after_idle(self._refresh_map)
-        elif tab == "POTA Spots" and not self._pota_loaded:
+            self._start_map_poll()
+        else:
+            self._stop_map_poll()
+        if tab == "POTA Spots" and not self._pota_loaded:
             self._pota_loaded = True
             threading.Thread(target=self._fetch_pota_spots, daemon=True).start()
 
