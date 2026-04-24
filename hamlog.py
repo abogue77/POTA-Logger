@@ -580,10 +580,11 @@ class POTAHunter(tk.Tk):
         self._pota_mode_var  = tk.StringVar(value="All")
         self._pota_hide_qrt  = tk.BooleanVar(value=False)
         self._pota_clicked_hz    = None
-        self._pota_scan_active   = False
-        self._pota_scan_idx      = 0
-        self._pota_scan_after_id = None
-        self._pota_scan_interval = tk.IntVar(value=15)
+        self._pota_scan_active       = False
+        self._pota_scan_idx          = 0
+        self._pota_scan_after_id     = None
+        self._pota_scan_interval     = tk.IntVar(value=15)
+        self._pota_scan_skip_worked  = tk.BooleanVar(value=False)
         self._map_markers   = {}
         self._map_drawn     = False
         self._map_resize_id = None
@@ -1026,6 +1027,9 @@ class POTAHunter(tk.Tk):
             relief="flat", cursor="hand2", padx=8,
             command=self._toggle_pota_scan)
         self._pota_scan_btn.pack(side="right", padx=6)
+        ttk.Checkbutton(
+            tb, text="Skip worked", variable=self._pota_scan_skip_worked
+        ).pack(side="right", padx=(0, 6))
         tk.Label(tb, text="s", bg=PBGK, fg=FG2, font=SM).pack(side="right")
         tk.Spinbox(tb, from_=5, to=60, increment=5,
                    textvariable=self._pota_scan_interval,
@@ -1289,6 +1293,19 @@ class POTAHunter(tk.Tk):
             return
         if self._pota_scan_idx >= len(children):
             self._pota_scan_idx = 0
+        if self._pota_scan_skip_worked.get():
+            try:
+                rows = self.conn.execute(
+                    "SELECT DISTINCT UPPER(TRIM(call)) FROM qso").fetchall()
+                worked = {r[0] for r in rows if r[0]}
+            except Exception:
+                worked = set()
+            for _ in range(len(children)):
+                iid = children[self._pota_scan_idx]
+                activator = str(self._pota_tree.item(iid, "values")[0]).strip().upper()
+                if activator not in worked:
+                    break
+                self._pota_scan_idx = (self._pota_scan_idx + 1) % len(children)
         iid = children[self._pota_scan_idx]
         self._pota_tree.selection_set(iid)
         self._pota_tree.see(iid)
