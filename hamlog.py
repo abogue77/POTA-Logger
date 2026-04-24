@@ -449,7 +449,12 @@ class HamLog(tk.Tk):
         self._pota_band_var  = tk.StringVar(value="All")
         self._pota_mode_var  = tk.StringVar(value="All")
         self._pota_hide_qrt  = tk.BooleanVar(value=False)
-        self._pota_clicked_hz = None
+        self._pota_clicked_hz    = None
+        self._pota_scan_active     = False
+        self._pota_scan_idx        = 0
+        self._pota_scan_after_id   = None
+        self._pota_scan_interval   = tk.IntVar(value=15)
+        self._pota_scan_selecting  = False
         self._map_markers   = {}
         self._map_drawn     = False
         self._map_resize_id = None
@@ -884,6 +889,18 @@ class HamLog(tk.Tk):
         tk.Button(tb, text="⟳ Refresh", bg=BG3, fg=FG, font=SM,
                   relief="flat", cursor="hand2", padx=8,
                   command=self._manual_pota_refresh).pack(side="right", padx=6)
+        self._pota_scan_btn = tk.Button(
+            tb, text="▶ Scan", bg=BG3, fg=FG, font=SM,
+            relief="flat", cursor="hand2", padx=8,
+            command=self._toggle_pota_scan)
+        self._pota_scan_btn.pack(side="right", padx=6)
+        tk.Label(tb, text="s", bg=PBGK, fg=FG2, font=SM).pack(side="right")
+        tk.Spinbox(tb, from_=5, to=60, increment=5,
+                   textvariable=self._pota_scan_interval,
+                   width=4, bg=BG3, fg=FG, font=SM,
+                   relief="flat", justify="center",
+                   buttonbackground=BG3).pack(side="right")
+        tk.Label(tb, text="Interval:", bg=PBGK, fg=FG2, font=SM).pack(side="right", padx=(8, 2))
 
         # Treeview
         frm = tk.Frame(parent, bg=PBGK)
@@ -982,6 +999,8 @@ class HamLog(tk.Tk):
         self._populate_pota_table(spots)
 
     def _on_pota_spot_select(self, event=None):
+        if self._pota_scan_active and not self._pota_scan_selecting:
+            self._stop_pota_scan()
         sel = self._pota_tree.selection()
         if not sel:
             return
@@ -1103,6 +1122,45 @@ class HamLog(tk.Tk):
         else:
             self._pota_pause_btn.config(text="⏸ Pause", fg=FG)
             self._pota_after_id = self.after(60_000, self._auto_refresh_pota)
+
+    def _toggle_pota_scan(self):
+        if self._pota_scan_active:
+            self._stop_pota_scan()
+        else:
+            self._start_pota_scan()
+
+    def _start_pota_scan(self):
+        if not self._pota_tree.get_children():
+            return
+        self._pota_scan_active = True
+        self._pota_scan_idx    = 0
+        self._pota_scan_btn.config(text="⏹ Stop Scan", fg=ACCENT)
+        self._pota_scan_step()
+
+    def _stop_pota_scan(self):
+        self._pota_scan_active = False
+        self._pota_scan_btn.config(text="▶ Scan", fg=FG)
+        if self._pota_scan_after_id:
+            self.after_cancel(self._pota_scan_after_id)
+            self._pota_scan_after_id = None
+
+    def _pota_scan_step(self):
+        if not self._pota_scan_active:
+            return
+        children = self._pota_tree.get_children()
+        if not children:
+            self._stop_pota_scan()
+            return
+        if self._pota_scan_idx >= len(children):
+            self._pota_scan_idx = 0
+        iid = children[self._pota_scan_idx]
+        self._pota_scan_selecting = True
+        self._pota_tree.selection_set(iid)
+        self._pota_scan_selecting = False
+        self._pota_tree.see(iid)
+        self._pota_scan_idx += 1
+        interval_ms = max(5, min(60, self._pota_scan_interval.get())) * 1_000
+        self._pota_scan_after_id = self.after(interval_ms, self._pota_scan_step)
 
     # ── Entry form ────────────────────────────────────────────────────────
     def _build_entry_form(self, parent):
@@ -1572,6 +1630,8 @@ class HamLog(tk.Tk):
             self.after_cancel(self._flrig_poll_id)
         if self._pota_after_id:
             self.after_cancel(self._pota_after_id)
+        if self._pota_scan_after_id:
+            self.after_cancel(self._pota_scan_after_id)
         if self._map_resize_id:
             self.after_cancel(self._map_resize_id)
         if self.conn:
