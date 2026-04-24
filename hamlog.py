@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-HamLog — Ham Radio Station Logger  v2.0
+POTA Hunter — POTA Activator Hunter & Ham Radio Logger  v2.0
 Cross-platform (Windows & Linux).  Standard library only.
 
 Entry form field order:
@@ -30,7 +30,9 @@ import webbrowser
 # ── Paths ─────────────────────────────────────────────────────────────────────
 LOGBOOK_DIR = os.path.join(os.path.expanduser("~"), "HamLog")
 os.makedirs(LOGBOOK_DIR, exist_ok=True)
-CONFIG_FILE = os.path.join(LOGBOOK_DIR, "config.json")
+CONFIG_FILE   = os.path.join(LOGBOOK_DIR, "config.json")
+PARKS_DB      = os.path.join(LOGBOOK_DIR, "pota_parks.db")
+PARKS_CSV_URL = "https://pota.app/all_parks_ext.csv"
 
 # ── Config ────────────────────────────────────────────────────────────────────
 DEFAULT_CONFIG = {
@@ -85,6 +87,134 @@ def make_index():
     conn.commit()
     return conn
 
+# ── POTA Parks DB ─────────────────────────────────────────────────────────────
+def _latlon_to_grid(lat, lon):
+    try:
+        lat, lon = float(lat), float(lon)
+    except (TypeError, ValueError):
+        return ""
+    lon += 180.0
+    lat += 90.0
+    field_lon = int(lon / 20)
+    field_lat = int(lat / 10)
+    sq_lon    = int((lon % 20) / 2)
+    sq_lat    = int(lat % 10)
+    return (chr(ord('A') + field_lon) +
+            chr(ord('A') + field_lat) +
+            str(sq_lon) +
+            str(sq_lat))
+
+def parks_db_exists():
+    if not os.path.exists(PARKS_DB):
+        return False
+    try:
+        with sqlite3.connect(PARKS_DB) as cx:
+            n = cx.execute("SELECT COUNT(*) FROM parks").fetchone()[0]
+        return n > 0
+    except Exception:
+        return False
+
+def build_parks_db(progress_cb=None):
+    """Download all_parks_ext.csv and rebuild ~/HamLog/pota_parks.db.
+    Returns (count, error_string). error_string is None on success.
+    Designed to run in a background thread; progress_cb(msg) is thread-safe."""
+    import csv, io
+    if progress_cb:
+        progress_cb("Downloading POTA parks list…")
+    try:
+        req = urllib.request.Request(
+            PARKS_CSV_URL,
+            headers={"User-Agent": "POTA-Hunter/2.0"})
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+    except Exception as e:
+        return 0, f"Download failed: {e}"
+
+    if progress_cb:
+        progress_cb("Parsing CSV…")
+
+    reader = csv.DictReader(io.StringIO(raw))
+    FIELD_MAP = {
+        "reference": ["reference", "park_reference", "park reference"],
+        "name":      ["name", "park_name", "park name"],
+        "latitude":  ["latitude", "lat"],
+        "longitude": ["longitude", "lon", "long"],
+        "grid":      ["grid", "gridsquare", "grid_square"],
+        "state":     ["locationname", "state", "location_name"],
+        "country":   ["entityname", "country", "entity_name"],
+    }
+
+    rows = []
+    for rec in reader:
+        lc = {k.strip().lower(): v.strip() for k, v in rec.items()}
+
+        def pick(candidates):
+            for c in candidates:
+                if lc.get(c):
+                    return lc[c]
+            return ""
+
+        ref = pick(FIELD_MAP["reference"]).upper()
+        if not ref:
+            continue
+        lat  = pick(FIELD_MAP["latitude"])
+        lon  = pick(FIELD_MAP["longitude"])
+        grid = pick(FIELD_MAP["grid"])
+        if not grid:
+            grid = _latlon_to_grid(lat, lon)
+        rows.append((
+            ref,
+            pick(FIELD_MAP["name"]),
+            lat,
+            lon,
+            grid.upper()[:6],
+            pick(FIELD_MAP["state"]),
+            pick(FIELD_MAP["country"]),
+        ))
+
+    if not rows:
+        return 0, "CSV parsed but contained no usable park records."
+
+    if progress_cb:
+        progress_cb(f"Writing {len(rows):,} parks to DB…")
+
+    try:
+        with sqlite3.connect(PARKS_DB) as cx:
+            cx.execute("DROP TABLE IF EXISTS parks")
+            cx.execute("""
+                CREATE TABLE parks (
+                    reference TEXT PRIMARY KEY,
+                    name      TEXT,
+                    latitude  REAL,
+                    longitude REAL,
+                    grid      TEXT,
+                    state     TEXT,
+                    country   TEXT
+                )
+            """)
+            cx.execute("CREATE INDEX IF NOT EXISTS idx_parks_ref ON parks(reference)")
+            cx.executemany("INSERT OR REPLACE INTO parks VALUES (?,?,?,?,?,?,?)", rows)
+    except Exception as e:
+        return 0, f"DB write failed: {e}"
+
+    if progress_cb:
+        progress_cb(f"POTA parks DB ready — {len(rows):,} parks.")
+    return len(rows), None
+
+def lookup_park(reference):
+    """Return a dict with park data or None. Thread-safe (new connection per call)."""
+    if not os.path.exists(PARKS_DB):
+        return None
+    try:
+        with sqlite3.connect(PARKS_DB) as cx:
+            cx.row_factory = sqlite3.Row
+            row = cx.execute(
+                "SELECT * FROM parks WHERE reference=?",
+                (reference.strip().upper(),)).fetchone()
+        return dict(row) if row else None
+    except Exception:
+        return None
+
 # ── ADIF helpers ──────────────────────────────────────────────────────────────
 def adif_field(tag, val):
     if val is None or str(val).strip() == "":
@@ -94,8 +224,8 @@ def adif_field(tag, val):
 
 def adif_header(mycall):
     now = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%SZ")
-    prog = "HamLog"
-    return (f"HamLog ADIF Log — {now}  Station: {mycall}\n"
+    prog = "POTA Hunter"
+    return (f"POTA Hunter ADIF Log — {now}  Station: {mycall}\n"
             + adif_field("ADIF_VER","3.1.0")
             + adif_field("PROGRAMID", prog)
             + "<EOH>\n\n")
@@ -427,10 +557,10 @@ def grid_to_latlon(gs):
         return None, None
 
 # ══════════════════════════════════════════════════════════════════════════════
-class HamLog(tk.Tk):
+class POTAHunter(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("HamLog")
+        self.title("POTA Hunter")
         self.configure(bg=BG)
         self.minsize(1000, 640)
         self.resizable(True, True)
@@ -449,7 +579,11 @@ class HamLog(tk.Tk):
         self._pota_band_var  = tk.StringVar(value="All")
         self._pota_mode_var  = tk.StringVar(value="All")
         self._pota_hide_qrt  = tk.BooleanVar(value=False)
-        self._pota_clicked_hz = None
+        self._pota_clicked_hz    = None
+        self._pota_scan_active   = False
+        self._pota_scan_idx      = 0
+        self._pota_scan_after_id = None
+        self._pota_scan_interval = tk.IntVar(value=15)
         self._map_markers   = {}
         self._map_drawn     = False
         self._map_resize_id = None
@@ -468,6 +602,7 @@ class HamLog(tk.Tk):
             threading.Thread(target=self._qrz_login_bg, daemon=True).start()
 
         self._start_flrig_poll()
+        self.after(1500, self._check_parks_db_on_startup)
 
     # ── TTK style ─────────────────────────────────────────────────────────
     def _style_ttk(self):
@@ -520,6 +655,8 @@ class HamLog(tk.Tk):
         sm.add_command(label="QRZ Login…",        command=self._qrz_settings)
         sm.add_command(label="Flrig Settings…",   command=self._flrig_settings)
         sm.add_separator()
+        sm.add_command(label="Update POTA Parks DB…", command=self._update_parks_db)
+        sm.add_separator()
         theme_label = ("☀ Switch to Light Mode"
                        if self.cfg.get("theme", "dark") == "dark"
                        else "☾ Switch to Dark Mode")
@@ -532,7 +669,7 @@ class HamLog(tk.Tk):
         # Top bar
         top = tk.Frame(self, bg=BG, pady=5)
         top.pack(fill="x", padx=14)
-        tk.Label(top, text="◈ HamLog", bg=BG, fg=ACCENT, font=TITLE).pack(side="left")
+        tk.Label(top, text="◈ POTA Hunter", bg=BG, fg=ACCENT, font=TITLE).pack(side="left")
         self._logbook_lbl = tk.Label(top, text="No logbook open", bg=BG, fg=FG2, font=SM)
         self._logbook_lbl.pack(side="left", padx=14)
         self._flrig_lbl = tk.Label(top, text="● Flrig: offline", bg=BG, fg=WARN, font=SM)
@@ -576,9 +713,9 @@ class HamLog(tk.Tk):
         tab2 = tk.Frame(self._nb, bg=BG)
         tab3 = tk.Frame(self._nb, bg=MAP_BG)
 
+        self._nb.add(tab3, text="  POTA Spots  ")
         self._nb.add(tab1, text="  QSO Log  ")
         self._nb.add(tab2, text="  Grid Map  ")
-        self._nb.add(tab3, text="  POTA Spots  ")
 
         self._build_tab_log(tab1)
         self._build_tab_map(tab2)
@@ -833,7 +970,7 @@ class HamLog(tk.Tk):
 
         html = (
             '<!DOCTYPE html>\n'
-            '<html><head><meta charset="utf-8"><title>HamLog Grid Map</title>\n'
+            '<html><head><meta charset="utf-8"><title>POTA Hunter Grid Map</title>\n'
             '<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>\n'
             '<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>\n'
             '<style>html,body,#map{height:100%;margin:0;background:#111318;}</style>\n'
@@ -877,13 +1014,25 @@ class HamLog(tk.Tk):
             tb, text="Hide QRT", variable=self._pota_hide_qrt,
             command=self._apply_pota_filters).pack(side="left", padx=(10, 0))
         self._pota_pause_btn = tk.Button(
-            tb, text="⏸ Pause", bg=BG3, fg=FG, font=SM,
+            tb, text="⏸ Pause Updates", bg=BG3, fg=FG, font=SM,
             relief="flat", cursor="hand2", padx=8,
             command=self._toggle_pota_pause)
         self._pota_pause_btn.pack(side="right")
         tk.Button(tb, text="⟳ Refresh", bg=BG3, fg=FG, font=SM,
                   relief="flat", cursor="hand2", padx=8,
                   command=self._manual_pota_refresh).pack(side="right", padx=6)
+        self._pota_scan_btn = tk.Button(
+            tb, text="▶ Scan", bg=BG3, fg=FG, font=SM,
+            relief="flat", cursor="hand2", padx=8,
+            command=self._toggle_pota_scan)
+        self._pota_scan_btn.pack(side="right", padx=6)
+        tk.Label(tb, text="s", bg=PBGK, fg=FG2, font=SM).pack(side="right")
+        tk.Spinbox(tb, from_=5, to=60, increment=5,
+                   textvariable=self._pota_scan_interval,
+                   width=4, bg=BG3, fg=FG, font=SM,
+                   relief="flat", justify="center",
+                   buttonbackground=BG3).pack(side="right")
+        tk.Label(tb, text="Interval:", bg=PBGK, fg=FG2, font=SM).pack(side="right", padx=(8, 2))
 
         # Treeview
         frm = tk.Frame(parent, bg=PBGK)
@@ -913,6 +1062,7 @@ class HamLog(tk.Tk):
         self._pota_tree.tag_configure("tuned",  background=POTA_TUNED,  foreground="#000000")
         self._pota_tree.tag_configure("worked", background=POTA_WORKED, foreground="#000000", font=("Courier New", 10, "bold"))
         self._pota_tree.bind("<<TreeviewSelect>>", self._on_pota_spot_select)
+        self._pota_tree.bind("<Button-1>", self._on_pota_tree_click)
 
     def _on_tab_changed(self, _=None):
         try:
@@ -980,6 +1130,10 @@ class HamLog(tk.Tk):
         self._pota_mode_cb["values"] = ["All"] + all_modes
 
         self._populate_pota_table(spots)
+
+    def _on_pota_tree_click(self, event=None):
+        if self._pota_scan_active:
+            self._stop_pota_scan()
 
     def _on_pota_spot_select(self, event=None):
         sel = self._pota_tree.selection()
@@ -1096,13 +1250,50 @@ class HamLog(tk.Tk):
     def _toggle_pota_pause(self):
         self._pota_paused = not self._pota_paused
         if self._pota_paused:
-            self._pota_pause_btn.config(text="▶ Resume", fg=ACCENT)
+            self._pota_pause_btn.config(text="▶ Resume Updates", fg=ACCENT)
             if self._pota_after_id:
                 self.after_cancel(self._pota_after_id)
                 self._pota_after_id = None
         else:
-            self._pota_pause_btn.config(text="⏸ Pause", fg=FG)
+            self._pota_pause_btn.config(text="⏸ Pause Updates", fg=FG)
             self._pota_after_id = self.after(60_000, self._auto_refresh_pota)
+
+    def _toggle_pota_scan(self):
+        if self._pota_scan_active:
+            self._stop_pota_scan()
+        else:
+            self._start_pota_scan()
+
+    def _start_pota_scan(self):
+        if not self._pota_tree.get_children():
+            return
+        self._pota_scan_active = True
+        self._pota_scan_idx    = 0
+        self._pota_scan_btn.config(text="⏹ Stop Scan", fg=ACCENT)
+        self._pota_scan_step()
+
+    def _stop_pota_scan(self):
+        self._pota_scan_active = False
+        self._pota_scan_btn.config(text="▶ Scan", fg=FG)
+        if self._pota_scan_after_id:
+            self.after_cancel(self._pota_scan_after_id)
+            self._pota_scan_after_id = None
+
+    def _pota_scan_step(self):
+        if not self._pota_scan_active:
+            return
+        children = self._pota_tree.get_children()
+        if not children:
+            self._stop_pota_scan()
+            return
+        if self._pota_scan_idx >= len(children):
+            self._pota_scan_idx = 0
+        iid = children[self._pota_scan_idx]
+        self._pota_tree.selection_set(iid)
+        self._pota_tree.see(iid)
+        self._pota_scan_idx += 1
+        interval_ms = max(5, min(60, self._pota_scan_interval.get())) * 1_000
+        self._pota_scan_after_id = self.after(interval_ms, self._pota_scan_step)
 
     # ── Entry form ────────────────────────────────────────────────────────
     def _build_entry_form(self, parent):
@@ -1113,8 +1304,8 @@ class HamLog(tk.Tk):
         f = tk.Frame(parent, bg=BG)
         f.pack(fill="x", padx=10, pady=(8,4))
 
-        labels = ["Callsign *", "RST Sent", "RST Rcvd", "Park #", "Comments", "Notes"]
-        col_weights = [0, 0, 0, 0, 1, 1]
+        labels = ["Callsign *", "RST Sent", "RST Rcvd", "Park #", "Grid", "Comments", "Notes"]
+        col_weights = [0, 0, 0, 0, 0, 1, 1]
         for i, (text, wt) in enumerate(zip(labels, col_weights)):
             tk.Label(f, text=text, **lbl_kw).grid(
                 row=0, column=i, sticky="w",
@@ -1138,21 +1329,28 @@ class HamLog(tk.Tk):
         self.e_rst_r.grid(row=1, column=2, padx=(10,4), sticky="w")
 
         self.e_park = tk.Entry(f, width=11, **ent)
-        self.e_park.bind("<Return>", self._log_qso)
+        self.e_park.bind("<Return>",   self._log_qso)
+        self.e_park.bind("<FocusOut>", self._on_park_focusout)
         self.e_park.grid(row=1, column=3, padx=(10,4), sticky="w")
+
+        self.e_grid = tk.Entry(f, width=7, **ent)
+        self.e_grid.bind("<Return>", self._log_qso)
+        self.e_grid.grid(row=1, column=4, padx=(10,4), sticky="w")
 
         self.e_comment = tk.Entry(f, width=22, **ent)
         self.e_comment.bind("<Return>", self._log_qso)
-        self.e_comment.grid(row=1, column=4, padx=(10,4), sticky="ew")
+        self.e_comment.grid(row=1, column=5, padx=(10,4), sticky="ew")
 
         self.e_notes = tk.Entry(f, width=22, **ent)
         self.e_notes.bind("<Return>", self._log_qso)
-        self.e_notes.grid(row=1, column=5, padx=(10,4), sticky="ew")
+        self.e_notes.grid(row=1, column=6, padx=(10,4), sticky="ew")
 
         info_row = tk.Frame(parent, bg=BG)
         info_row.pack(fill="x", padx=10, pady=(2,0))
         self._qrz_info_lbl = tk.Label(info_row, text="", bg=BG, fg=ACC3, font=SM)
         self._qrz_info_lbl.pack(side="left")
+        self._park_info_lbl = tk.Label(info_row, text="", bg=BG, fg=MUTED, font=SM)
+        self._park_info_lbl.pack(side="left", padx=(12, 0))
         self._rig_snap_lbl = tk.Label(info_row,
             text="Freq / Band / Mode will be captured from Flrig when LOG QSO is pressed.",
             bg=BG, fg=MUTED, font=SM)
@@ -1190,12 +1388,47 @@ class HamLog(tk.Tk):
         self._qrz_info_lbl.config(
             text=("QRZ: " + "  ".join(parts)) if parts else "")
 
+    def _on_park_focusout(self, _=None):
+        ref = self.e_park.get().strip().upper()
+        if not ref:
+            self._park_info_lbl.config(text="", fg=MUTED)
+            return
+        self.e_park.delete(0, "end")
+        self.e_park.insert(0, ref)
+        if not parks_db_exists():
+            self._park_info_lbl.config(
+                text="Parks DB not built — use Settings > Update POTA Parks DB",
+                fg=WARN)
+            return
+        self._park_info_lbl.config(text="Looking up…", fg=MUTED)
+        threading.Thread(target=self._park_lookup_bg,
+                         args=(ref,), daemon=True).start()
+
+    def _park_lookup_bg(self, ref):
+        info = lookup_park(ref)
+        self.after(0, lambda: self._apply_park_info(ref, info))
+
+    def _apply_park_info(self, ref, info):
+        if info is None:
+            self._park_info_lbl.config(text=f"Park {ref} not found in DB", fg=WARN)
+            return
+        grid  = info.get("grid", "")
+        name  = info.get("name", "")
+        state = info.get("state", "")
+        if grid and not self.e_grid.get().strip():
+            self.e_grid.delete(0, "end")
+            self.e_grid.insert(0, grid[:4])
+        parts = [p for p in (name, state) if p]
+        label = " — ".join(parts) + (f"  [{grid}]" if grid else "") if parts else ref
+        self._park_info_lbl.config(text=label, fg=ACC3)
+
     def _clear_form(self):
-        for w in (self.e_call, self.e_park, self.e_comment, self.e_notes):
+        for w in (self.e_call, self.e_park, self.e_grid, self.e_comment, self.e_notes):
             w.delete(0,"end")
         self.e_rst_s.delete(0,"end"); self.e_rst_s.insert(0,"59")
         self.e_rst_r.delete(0,"end"); self.e_rst_r.insert(0,"59")
         self._qrz_info_lbl.config(text="")
+        self._park_info_lbl.config(text="", fg=MUTED)
         self.e_call.focus_set()
 
     # ── Log QSO ───────────────────────────────────────────────────────────
@@ -1235,7 +1468,7 @@ class HamLog(tk.Tk):
             "rst_rcvd":   self.e_rst_r.get().strip() or "59",
             "name":       "",
             "qth":        "",
-            "gridsquare": "",
+            "gridsquare": self.e_grid.get().strip().upper(),
             "park_nr":    self.e_park.get().strip(),
             "comment":    self.e_comment.get().strip(),
             "notes":      self.e_notes.get().strip(),
@@ -1359,7 +1592,7 @@ class HamLog(tk.Tk):
 
     # ── Logbook management ────────────────────────────────────────────────
     def _prompt_logbook(self):
-        if messagebox.askyesno("HamLog",
+        if messagebox.askyesno("POTA Hunter",
                 "No logbook open.\nCreate a new logbook?"):
             self._new_logbook()
         else:
@@ -1394,7 +1627,7 @@ class HamLog(tk.Tk):
         count = load_adif_into_index(path, self.conn)
         name  = os.path.splitext(os.path.basename(path))[0]
         self._logbook_lbl.config(text=f"Logbook: {name}  [{path}]", fg=ACC3)
-        self.title(f"HamLog — {name}")
+        self.title(f"POTA Hunter — {name}")
         self.cfg["last_logbook"] = path
         save_config(self.cfg)
         self._reload_table()
@@ -1449,6 +1682,44 @@ class HamLog(tk.Tk):
     def _station_settings(self): StationDialog(self, self.cfg)
     def _qrz_settings(self):     QRZDialog(self, self.cfg)
     def _flrig_settings(self):   FlrigDialog(self, self.cfg)
+
+    def _update_parks_db(self):
+        if not messagebox.askyesno(
+                "Update POTA Parks DB",
+                "Download the latest POTA parks list from pota.app\n"
+                "and rebuild the local database?\n\n"
+                f"Destination: {PARKS_DB}"):
+            return
+        self._set_status("Downloading POTA parks list…")
+
+        def _progress(msg):
+            self.after(0, lambda: self._set_status(msg))
+
+        def _worker():
+            count, err = build_parks_db(progress_cb=_progress)
+            if err:
+                self.after(0, lambda: (
+                    messagebox.showerror("Parks DB Error", err),
+                    self._set_status(f"Parks DB update failed: {err}")))
+            else:
+                self.after(0, lambda: (
+                    messagebox.showinfo(
+                        "Parks DB Updated",
+                        f"Downloaded and indexed {count:,} parks.\n"
+                        f"Saved to: {PARKS_DB}"),
+                    self._set_status(f"Parks DB updated — {count:,} parks.")))
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _check_parks_db_on_startup(self):
+        if parks_db_exists():
+            return
+        if messagebox.askyesno(
+                "POTA Parks Database",
+                "The POTA parks database has not been built yet.\n\n"
+                "Download it now? (~1 MB, runs in background)\n"
+                f"Will be saved to: {PARKS_DB}"):
+            self._update_parks_db()
 
     def _switch_theme(self):
         current = self.cfg.get("theme", "dark")
@@ -1557,8 +1828,8 @@ class HamLog(tk.Tk):
         self._mycall_lbl.config(text=call.upper() if call else "No callsign set")
 
     def _about(self):
-        messagebox.showinfo("About HamLog",
-            "HamLog v2.0 — Ham Radio Station Logger\n\n"
+        messagebox.showinfo("About POTA Hunter",
+            "POTA Hunter v2.0 — POTA Activator Hunter & Ham Radio Logger\n\n"
             "Entry order:\n"
             "  Callsign → RST Sent → RST Rcvd\n"
             "  → Park # → Comments → Notes\n\n"
@@ -1572,6 +1843,8 @@ class HamLog(tk.Tk):
             self.after_cancel(self._flrig_poll_id)
         if self._pota_after_id:
             self.after_cancel(self._pota_after_id)
+        if self._pota_scan_after_id:
+            self.after_cancel(self._pota_scan_after_id)
         if self._map_resize_id:
             self.after_cancel(self._map_resize_id)
         if self.conn:
@@ -1768,5 +2041,5 @@ class FlrigDialog(tk.Toplevel):
 # ── Entry point ───────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     _apply_palette(load_config().get("theme", "dark"))
-    app = HamLog()
+    app = POTAHunter()
     app.mainloop()
