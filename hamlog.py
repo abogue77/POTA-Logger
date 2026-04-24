@@ -450,11 +450,10 @@ class HamLog(tk.Tk):
         self._pota_mode_var  = tk.StringVar(value="All")
         self._pota_hide_qrt  = tk.BooleanVar(value=False)
         self._pota_clicked_hz    = None
-        self._pota_scan_active     = False
-        self._pota_scan_idx        = 0
-        self._pota_scan_after_id   = None
-        self._pota_scan_interval   = tk.IntVar(value=15)
-        self._pota_scan_selecting  = False
+        self._pota_scan_active   = False
+        self._pota_scan_idx      = 0
+        self._pota_scan_after_id = None
+        self._pota_scan_interval = tk.IntVar(value=15)
         self._map_markers   = {}
         self._map_drawn     = False
         self._map_resize_id = None
@@ -930,6 +929,7 @@ class HamLog(tk.Tk):
         self._pota_tree.tag_configure("tuned",  background=POTA_TUNED,  foreground="#000000")
         self._pota_tree.tag_configure("worked", background=POTA_WORKED, foreground="#000000", font=("Courier New", 10, "bold"))
         self._pota_tree.bind("<<TreeviewSelect>>", self._on_pota_spot_select)
+        self._pota_tree.bind("<Button-1>", self._on_pota_tree_click)
 
     def _on_tab_changed(self, _=None):
         try:
@@ -998,9 +998,11 @@ class HamLog(tk.Tk):
 
         self._populate_pota_table(spots)
 
-    def _on_pota_spot_select(self, event=None):
-        if self._pota_scan_active and not self._pota_scan_selecting:
+    def _on_pota_tree_click(self, event=None):
+        if self._pota_scan_active:
             self._stop_pota_scan()
+
+    def _on_pota_spot_select(self, event=None):
         sel = self._pota_tree.selection()
         if not sel:
             return
@@ -1154,9 +1156,7 @@ class HamLog(tk.Tk):
         if self._pota_scan_idx >= len(children):
             self._pota_scan_idx = 0
         iid = children[self._pota_scan_idx]
-        self._pota_scan_selecting = True
         self._pota_tree.selection_set(iid)
-        self._pota_scan_selecting = False
         self._pota_tree.see(iid)
         self._pota_scan_idx += 1
         interval_ms = max(5, min(60, self._pota_scan_interval.get())) * 1_000
