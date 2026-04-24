@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-HamLog — Ham Radio Station Logger  v2.0
+POTA Hunter — POTA Activator Hunter & Ham Radio Logger  v2.0
 Cross-platform (Windows & Linux).  Standard library only.
 
 Entry form field order:
@@ -94,8 +94,8 @@ def adif_field(tag, val):
 
 def adif_header(mycall):
     now = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%SZ")
-    prog = "HamLog"
-    return (f"HamLog ADIF Log — {now}  Station: {mycall}\n"
+    prog = "POTA Hunter"
+    return (f"POTA Hunter ADIF Log — {now}  Station: {mycall}\n"
             + adif_field("ADIF_VER","3.1.0")
             + adif_field("PROGRAMID", prog)
             + "<EOH>\n\n")
@@ -427,10 +427,10 @@ def grid_to_latlon(gs):
         return None, None
 
 # ══════════════════════════════════════════════════════════════════════════════
-class HamLog(tk.Tk):
+class POTAHunter(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("HamLog")
+        self.title("POTA Hunter")
         self.configure(bg=BG)
         self.minsize(1000, 640)
         self.resizable(True, True)
@@ -536,7 +536,7 @@ class HamLog(tk.Tk):
         # Top bar
         top = tk.Frame(self, bg=BG, pady=5)
         top.pack(fill="x", padx=14)
-        tk.Label(top, text="◈ HamLog", bg=BG, fg=ACCENT, font=TITLE).pack(side="left")
+        tk.Label(top, text="◈ POTA Hunter", bg=BG, fg=ACCENT, font=TITLE).pack(side="left")
         self._logbook_lbl = tk.Label(top, text="No logbook open", bg=BG, fg=FG2, font=SM)
         self._logbook_lbl.pack(side="left", padx=14)
         self._flrig_lbl = tk.Label(top, text="● Flrig: offline", bg=BG, fg=WARN, font=SM)
@@ -837,7 +837,7 @@ class HamLog(tk.Tk):
 
         html = (
             '<!DOCTYPE html>\n'
-            '<html><head><meta charset="utf-8"><title>HamLog Grid Map</title>\n'
+            '<html><head><meta charset="utf-8"><title>POTA Hunter Grid Map</title>\n'
             '<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>\n'
             '<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>\n'
             '<style>html,body,#map{height:100%;margin:0;background:#111318;}</style>\n'
@@ -881,7 +881,7 @@ class HamLog(tk.Tk):
             tb, text="Hide QRT", variable=self._pota_hide_qrt,
             command=self._apply_pota_filters).pack(side="left", padx=(10, 0))
         self._pota_pause_btn = tk.Button(
-            tb, text="⏸ Pause", bg=BG3, fg=FG, font=SM,
+            tb, text="⏸ Pause Updates", bg=BG3, fg=FG, font=SM,
             relief="flat", cursor="hand2", padx=8,
             command=self._toggle_pota_pause)
         self._pota_pause_btn.pack(side="right")
@@ -1117,12 +1117,12 @@ class HamLog(tk.Tk):
     def _toggle_pota_pause(self):
         self._pota_paused = not self._pota_paused
         if self._pota_paused:
-            self._pota_pause_btn.config(text="▶ Resume", fg=ACCENT)
+            self._pota_pause_btn.config(text="▶ Resume Updates", fg=ACCENT)
             if self._pota_after_id:
                 self.after_cancel(self._pota_after_id)
                 self._pota_after_id = None
         else:
-            self._pota_pause_btn.config(text="⏸ Pause", fg=FG)
+            self._pota_pause_btn.config(text="⏸ Pause Updates", fg=FG)
             self._pota_after_id = self.after(60_000, self._auto_refresh_pota)
 
     def _toggle_pota_scan(self):
@@ -1417,7 +1417,7 @@ class HamLog(tk.Tk):
 
     # ── Logbook management ────────────────────────────────────────────────
     def _prompt_logbook(self):
-        if messagebox.askyesno("HamLog",
+        if messagebox.askyesno("POTA Hunter",
                 "No logbook open.\nCreate a new logbook?"):
             self._new_logbook()
         else:
@@ -1452,7 +1452,7 @@ class HamLog(tk.Tk):
         count = load_adif_into_index(path, self.conn)
         name  = os.path.splitext(os.path.basename(path))[0]
         self._logbook_lbl.config(text=f"Logbook: {name}  [{path}]", fg=ACC3)
-        self.title(f"HamLog — {name}")
+        self.title(f"POTA Hunter — {name}")
         self.cfg["last_logbook"] = path
         save_config(self.cfg)
         self._reload_table()
@@ -1615,8 +1615,8 @@ class HamLog(tk.Tk):
         self._mycall_lbl.config(text=call.upper() if call else "No callsign set")
 
     def _about(self):
-        messagebox.showinfo("About HamLog",
-            "HamLog v2.0 — Ham Radio Station Logger\n\n"
+        messagebox.showinfo("About POTA Hunter",
+            "POTA Hunter v2.0 — POTA Activator Hunter & Ham Radio Logger\n\n"
             "Entry order:\n"
             "  Callsign → RST Sent → RST Rcvd\n"
             "  → Park # → Comments → Notes\n\n"
@@ -1828,5 +1828,5 @@ class FlrigDialog(tk.Toplevel):
 # ── Entry point ───────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     _apply_palette(load_config().get("theme", "dark"))
-    app = HamLog()
+    app = POTAHunter()
     app.mainloop()
