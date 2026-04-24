@@ -883,6 +883,7 @@ class POTAHunter(tk.Tk):
         if not hasattr(self, '_map_canvas'):
             return
         canvas = self._map_canvas
+        self.update_idletasks()
         W = canvas.winfo_width()
         H = canvas.winfo_height()
         if W < 10 or H < 10:
@@ -1074,7 +1075,7 @@ class POTAHunter(tk.Tk):
         except Exception:
             return
         if tab == "Grid Map":
-            self.after(50, self._refresh_map)
+            self.after_idle(self._refresh_map)
         elif tab == "POTA Spots" and not self._pota_loaded:
             self._pota_loaded = True
             threading.Thread(target=self._fetch_pota_spots, daemon=True).start()
