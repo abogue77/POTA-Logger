@@ -291,7 +291,7 @@ def adif_to_row_dict(d):
         "rst_rcvd":   d.get("RST_RCVD","59"),
         "name":       d.get("NAME",""),
         "qth":        d.get("QTH",""),
-        "gridsquare": d.get("GRIDSQUARE",""),
+        "gridsquare": d.get("GRIDSQUARE","") or d.get("GRID",""),
         "park_nr":    d.get("POTA_REF",""),
         "comment":    d.get("COMMENT",""),
         "notes":      d.get("NOTES",""),
@@ -568,6 +568,8 @@ class POTAHunter(tk.Tk):
         self.cfg           = load_config()
         self.conn          = make_index()
         self.adif_path     = ""
+        self._map_poll_id    = None
+        self._map_adif_mtime = None
         self._flrig_freq_hz = None
         self._flrig_mode    = None
         self._flrig_poll_id = None
@@ -580,10 +582,11 @@ class POTAHunter(tk.Tk):
         self._pota_mode_var  = tk.StringVar(value="All")
         self._pota_hide_qrt  = tk.BooleanVar(value=False)
         self._pota_clicked_hz    = None
-        self._pota_scan_active   = False
-        self._pota_scan_idx      = 0
-        self._pota_scan_after_id = None
-        self._pota_scan_interval = tk.IntVar(value=15)
+        self._pota_scan_active       = False
+        self._pota_scan_idx          = 0
+        self._pota_scan_after_id     = None
+        self._pota_scan_interval     = tk.IntVar(value=15)
+        self._pota_scan_skip_worked  = tk.BooleanVar(value=False)
         self._map_markers   = {}
         self._map_drawn     = False
         self._map_resize_id = None
@@ -882,6 +885,7 @@ class POTAHunter(tk.Tk):
         if not hasattr(self, '_map_canvas'):
             return
         canvas = self._map_canvas
+        self.update_idletasks()
         W = canvas.winfo_width()
         H = canvas.winfo_height()
         if W < 10 or H < 10:
@@ -891,31 +895,47 @@ class POTAHunter(tk.Tk):
             return
         self._draw_map_markers(W, H)
 
+    def _read_adif_grids(self):
+        """Read the active ADIF log file and return grouped grid square data."""
+        if not self.adif_path or not os.path.exists(self.adif_path):
+            return []
+        try:
+            with open(self.adif_path, "r", encoding="utf-8", errors="replace") as f:
+                text = f.read()
+        except OSError:
+            return []
+        records = parse_adif_records(text)
+        groups = {}
+        for rec in records:
+            raw_gs = (rec.get("GRIDSQUARE", "") or rec.get("GRID", "")).strip().upper()[:4]
+            if len(raw_gs) < 4:
+                continue
+            call = rec.get("CALL", "").strip()
+            if raw_gs not in groups:
+                groups[raw_gs] = {"calls": [], "cnt": 0}
+            groups[raw_gs]["cnt"] += 1
+            if call and call not in groups[raw_gs]["calls"]:
+                groups[raw_gs]["calls"].append(call)
+        return [{"gs": gs, "calls": ", ".join(v["calls"]), "cnt": v["cnt"]}
+                for gs, v in groups.items()]
+
     def _draw_map_markers(self, W, H):
         canvas = self._map_canvas
         canvas.delete("marker")
         self._map_markers = {}
 
-        rows = self.conn.execute(
-            "SELECT gridsquare, GROUP_CONCAT(call, ', ') AS calls, COUNT(*) AS cnt "
-            "FROM qso WHERE gridsquare IS NOT NULL AND gridsquare != '' "
-            "GROUP BY UPPER(SUBSTR(gridsquare,1,4))"
-        ).fetchall()
+        rows = self._read_adif_grids()
 
         for row in rows:
-            gs = (row["gridsquare"] or "").strip().upper()[:4]
-            if len(gs) < 4:
-                continue
+            gs = row["gs"]
             lat, lon = grid_to_latlon(gs)
             if lat is None:
                 continue
             x = (lon + 180) / 360 * W
             y = (90 - lat) / 180 * H
             cnt = row["cnt"]
-            # Glow
             canvas.create_rectangle(x-7, y-5, x+7, y+5,
                                     fill=MAP_GLOW, outline="", tags="marker")
-            # Marker
             canvas.create_rectangle(x-5, y-3, x+5, y+3,
                                     fill=ACCENT, outline="", tags="marker")
             if cnt > 1:
@@ -927,8 +947,9 @@ class POTAHunter(tk.Tk):
             )
 
         n = len(rows)
+        total_qsos = sum(r["cnt"] for r in rows)
         self._map_count_lbl.config(
-            text=f"{n} grid square{'s' if n != 1 else ''} contacted")
+            text=f"{n} grid square{'s' if n != 1 else ''} ({total_qsos} QSO{'s' if total_qsos != 1 else ''})")
 
     def _on_map_motion(self, event):
         canvas = self._map_canvas
@@ -948,17 +969,11 @@ class POTAHunter(tk.Tk):
             self._map_tooltip.place_forget()
 
     def _open_leaflet_map(self):
-        rows = self.conn.execute(
-            "SELECT gridsquare, GROUP_CONCAT(call, ', ') AS calls, COUNT(*) AS cnt "
-            "FROM qso WHERE gridsquare IS NOT NULL AND gridsquare != '' "
-            "GROUP BY UPPER(SUBSTR(gridsquare,1,4))"
-        ).fetchall()
+        rows = self._read_adif_grids()
 
         markers_js = []
         for row in rows:
-            gs = (row["gridsquare"] or "").strip().upper()[:4]
-            if len(gs) < 4:
-                continue
+            gs = row["gs"]
             lat, lon = grid_to_latlon(gs)
             if lat is None:
                 continue
@@ -987,6 +1002,25 @@ class POTAHunter(tk.Tk):
         with open(tmp, "w", encoding="utf-8") as f:
             f.write(html)
         webbrowser.open(tmp)
+
+    def _start_map_poll(self):
+        self._stop_map_poll()
+        self._do_map_poll()
+
+    def _do_map_poll(self):
+        try:
+            mtime = os.path.getmtime(self.adif_path) if self.adif_path and os.path.exists(self.adif_path) else None
+        except OSError:
+            mtime = None
+        if mtime != self._map_adif_mtime:
+            self._map_adif_mtime = mtime
+            self._refresh_map()
+        self._map_poll_id = self.after(5000, self._do_map_poll)
+
+    def _stop_map_poll(self):
+        if self._map_poll_id:
+            self.after_cancel(self._map_poll_id)
+            self._map_poll_id = None
 
     # ── Tab 3: POTA Spots ─────────────────────────────────────────────────
     def _build_tab_pota(self, parent):
@@ -1026,6 +1060,9 @@ class POTAHunter(tk.Tk):
             relief="flat", cursor="hand2", padx=8,
             command=self._toggle_pota_scan)
         self._pota_scan_btn.pack(side="right", padx=6)
+        ttk.Checkbutton(
+            tb, text="Skip worked", variable=self._pota_scan_skip_worked
+        ).pack(side="right", padx=(0, 6))
         tk.Label(tb, text="s", bg=PBGK, fg=FG2, font=SM).pack(side="right")
         tk.Spinbox(tb, from_=5, to=60, increment=5,
                    textvariable=self._pota_scan_interval,
@@ -1070,8 +1107,10 @@ class POTAHunter(tk.Tk):
         except Exception:
             return
         if tab == "Grid Map":
-            self.after(50, self._refresh_map)
-        elif tab == "POTA Spots" and not self._pota_loaded:
+            self._start_map_poll()
+        else:
+            self._stop_map_poll()
+        if tab == "POTA Spots" and not self._pota_loaded:
             self._pota_loaded = True
             threading.Thread(target=self._fetch_pota_spots, daemon=True).start()
 
@@ -1164,6 +1203,7 @@ class POTAHunter(tk.Tk):
         self._pota_clicked_hz = freq_hz
         self._tune_suppress_until = time.monotonic() + 4.0
         self._refresh_pota_highlights()
+        self._pota_tree.selection_set([])
         host = self.cfg["flrig_host"]
         port = self.cfg["flrig_port"]
         self._pota_status_lbl.config(text=f"Tuning to {freq_mhz_disp} MHz…", fg=FG2)
@@ -1288,6 +1328,19 @@ class POTAHunter(tk.Tk):
             return
         if self._pota_scan_idx >= len(children):
             self._pota_scan_idx = 0
+        if self._pota_scan_skip_worked.get():
+            try:
+                rows = self.conn.execute(
+                    "SELECT DISTINCT UPPER(TRIM(call)) FROM qso").fetchall()
+                worked = {r[0] for r in rows if r[0]}
+            except Exception:
+                worked = set()
+            for _ in range(len(children)):
+                iid = children[self._pota_scan_idx]
+                activator = str(self._pota_tree.item(iid, "values")[0]).strip().upper()
+                if activator not in worked:
+                    break
+                self._pota_scan_idx = (self._pota_scan_idx + 1) % len(children)
         iid = children[self._pota_scan_idx]
         self._pota_tree.selection_set(iid)
         self._pota_tree.see(iid)
@@ -1513,9 +1566,8 @@ class POTAHunter(tk.Tk):
                 tags=(tag,))
         n = len(rows)
         self._qso_count_lbl.config(text=f"{n} QSO{'s' if n!=1 else ''}")
-        # Refresh map markers if map has been drawn
-        if self._map_drawn:
-            self._refresh_map()
+        # Always attempt a map refresh; _refresh_map guards internally
+        self._refresh_map()
 
     def _apply_filter(self):
         q    = self._search_var.get().strip()
