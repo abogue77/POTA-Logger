@@ -1182,6 +1182,7 @@ class POTAHunter(tk.Tk):
         values = self._pota_tree.item(sel[0], "values")
         activator = values[0]
         park      = values[1]
+        park_name = values[2]  # Park name from POTA API
         freq_str  = values[3]
 
         # Populate QSO entry fields
@@ -1196,16 +1197,11 @@ class POTAHunter(tk.Tk):
             self.e_grid.delete(0, "end")
             self.e_grid.insert(0, park_data["grid"][:4])  # Maidenhead grid square (4 characters)
         
-        # Update park info label
-        if park_data:
-            name  = park_data.get("name", "")
-            state = park_data.get("state", "")
-            grid  = park_data.get("grid", "")
-            parts = [p for p in (name, state) if p]
-            label = " — ".join(parts) + (f"  [{grid}]" if grid else "") if parts else park
-            self._park_info_lbl.config(text=label, fg=ACC3)
+        # Update park info label with park name from spot data
+        if park_name:
+            self._park_info_lbl.config(text=f"{park_name} ({park})", fg=ACC3)
         else:
-            self._park_info_lbl.config(text=f"Park {park} not found in DB", fg=WARN)
+            self._park_info_lbl.config(text=f"Park {park}", fg=MUTED)
 
         # Tune radio — POTA API returns frequency in kHz (e.g. 14225 = 14.225 MHz)
         try:
