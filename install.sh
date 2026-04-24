@@ -55,13 +55,13 @@ echo "Tkinter OK"
 mkdir -p "$INSTALL_DIR" "$BIN_DIR" "$DESKTOP_DIR"
 
 # 4. Copy application file
-cp "$SCRIPT_DIR/hamlog.py" "$INSTALL_DIR/hamlog.py"
-echo "Installed hamlog.py -> $INSTALL_DIR/hamlog.py"
+cp "$SCRIPT_DIR/hamlog.pyw" "$INSTALL_DIR/hamlog.pyw"
+echo "Installed hamlog.pyw -> $INSTALL_DIR/hamlog.pyw"
 
 # 5. Create launcher script
 cat > "$BIN_DIR/$APP_NAME" <<EOF
 #!/usr/bin/env bash
-exec python3 "\$HOME/.local/share/hamlog/hamlog.py" "\$@"
+exec python3 "\$HOME/.local/share/hamlog/hamlog.pyw" "\$@"
 EOF
 chmod +x "$BIN_DIR/$APP_NAME"
 echo "Created launcher  -> $BIN_DIR/$APP_NAME"
