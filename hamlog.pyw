@@ -1190,12 +1190,22 @@ class POTAHunter(tk.Tk):
         self.e_park.delete(0, "end")
         self.e_park.insert(0, park)
 
-        # Look up park in database and populate grid square if empty
-        if not self.e_grid.get().strip():
-            park_data = lookup_park(park)
-            if park_data and park_data.get("grid"):
-                self.e_grid.delete(0, "end")
-                self.e_grid.insert(0, park_data["grid"][:4])  # Maidenhead grid square (4 characters)
+        # Look up park in database and populate grid square
+        park_data = lookup_park(park)
+        if park_data and park_data.get("grid"):
+            self.e_grid.delete(0, "end")
+            self.e_grid.insert(0, park_data["grid"][:4])  # Maidenhead grid square (4 characters)
+        
+        # Update park info label
+        if park_data:
+            name  = park_data.get("name", "")
+            state = park_data.get("state", "")
+            grid  = park_data.get("grid", "")
+            parts = [p for p in (name, state) if p]
+            label = " — ".join(parts) + (f"  [{grid}]" if grid else "") if parts else park
+            self._park_info_lbl.config(text=label, fg=ACC3)
+        else:
+            self._park_info_lbl.config(text=f"Park {park} not found in DB", fg=WARN)
 
         # Tune radio — POTA API returns frequency in kHz (e.g. 14225 = 14.225 MHz)
         try:
