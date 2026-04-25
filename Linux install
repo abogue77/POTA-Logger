@@ -1,0 +1,33 @@
+Linus install instructions
+
+Clone or copy the repo to the Linux machine:
+
+
+git clone <your-repo-url>
+cd POTA-Logger
+Make the installer executable:
+
+
+chmod +x install.sh
+Run the installer:
+
+
+./install.sh
+The script will:
+
+Verify Python 3 is present
+Auto-install python3-tk via apt, dnf, pacman, or zypper if needed
+Copy hamlog.pyw to ~/.local/share/hamlog/
+Create a hamlog launcher in ~/.local/bin/
+Create a hamlog.desktop entry for the app menu
+Create ~/HamLog/ for logs and config
+If prompted about PATH (script will tell you), add this to ~/.bashrc:
+
+
+export PATH="$HOME/.local/bin:$PATH"
+Then reload: source ~/.bashrc
+
+Launch the app:
+
+
+hamlog
