@@ -1493,9 +1493,11 @@ class POTAHunter(tk.Tk):
 
         info_row = tk.Frame(parent, bg=BG)
         info_row.pack(fill="x", padx=10, pady=(2,0))
-        self._qrz_info_lbl = tk.Label(info_row, text="", bg=BG, fg=ACC3, font=SM)
+        self._qrz_info_lbl = tk.Label(info_row, text="", bg=BG, fg=ACC3, font=SM,
+                                       width=40, anchor="w")
         self._qrz_info_lbl.pack(side="left")
-        self._park_info_lbl = tk.Label(info_row, text="", bg=BG, fg=MUTED, font=SM)
+        self._park_info_lbl = tk.Label(info_row, text="", bg=BG, fg=MUTED, font=SM,
+                                       width=50, anchor="w")
         self._park_info_lbl.pack(side="left", padx=(12, 0))
         self._rig_snap_lbl = tk.Label(info_row,
             text="Freq / Band / Mode will be captured from Flrig when LOG QSO is pressed.",
