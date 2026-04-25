@@ -471,34 +471,47 @@ BANDS = ["160m","80m","60m","40m","30m","20m","17m","15m","12m","10m",
          "6m","2m","70cm","SAT","Other"]
 
 def _make_reticle_img(size, fg_hex, bg_hex):
-    """Return a tk.PhotoImage of a scope reticle (crosshair + circle)."""
-    import math, base64
+    """Return a tk.PhotoImage of a scope reticle (crosshair + circle), encoded as PNG."""
+    import math, struct, zlib, base64
     def _rgb(h):
         h = h.lstrip('#')
         return (int(h[0:2],16), int(h[2:4],16), int(h[4:6],16))
     fg, bg = _rgb(fg_hex), _rgb(bg_hex)
-    buf = bytearray(bytes(bg) * size * size)
+    buf = bytearray()
+    for _ in range(size * size):
+        buf.extend(bg)
     def put(x, y):
         if 0 <= x < size and 0 <= y < size:
             i = (y * size + x) * 3
             buf[i:i+3] = bytes(fg)
     cx = cy = size // 2
-    gap = 3          # clear pixels around centre so lines don't overlap circle
+    gap = 3
     radius = size // 2 - 2
-    for x in range(size):                    # horizontal arm
+    for x in range(size):
         if abs(x - cx) > gap:
             for dy in (-1, 0, 1):
                 put(x, cy + dy)
-    for y in range(size):                    # vertical arm
+    for y in range(size):
         if abs(y - cy) > gap:
             for dx in (-1, 0, 1):
                 put(cx + dx, y)
-    for a in range(720):                     # circle (2× resolution → fewer gaps)
+    for a in range(720):
         rad = math.radians(a / 2)
         put(int(round(cx + radius * math.cos(rad))),
             int(round(cy + radius * math.sin(rad))))
-    ppm = f"P6\n{size} {size}\n255\n".encode() + bytes(buf)
-    return tk.PhotoImage(data=base64.b64encode(ppm).decode())
+    def _png_chunk(tag, data):
+        c = tag + data
+        return struct.pack('>I', len(data)) + c + struct.pack('>I', zlib.crc32(c) & 0xffffffff)
+    ihdr = struct.pack('>IIBBBBB', size, size, 8, 2, 0, 0, 0)
+    raw = bytearray()
+    for y in range(size):
+        raw.append(0)
+        raw.extend(buf[y * size * 3:(y + 1) * size * 3])
+    png = (b'\x89PNG\r\n\x1a\n'
+           + _png_chunk(b'IHDR', ihdr)
+           + _png_chunk(b'IDAT', zlib.compress(bytes(raw)))
+           + _png_chunk(b'IEND', b''))
+    return tk.PhotoImage(data=base64.b64encode(png).decode())
 
 # ── Simplified world coastline outlines (lon, lat) ────────────────────────────
 # Each sub-list is one polyline drawn on the map canvas.
