@@ -2233,6 +2233,13 @@ class FlrigDialog(tk.Toplevel):
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    _apply_palette(load_config().get("theme", "dark"))
-    app = POTAHunter()
-    app.mainloop()
+    import traceback, pathlib
+    _log = pathlib.Path.home() / "HamLog" / "startup_error.log"
+    try:
+        _apply_palette(load_config().get("theme", "dark"))
+        app = POTAHunter()
+        app.mainloop()
+    except Exception:
+        _log.parent.mkdir(parents=True, exist_ok=True)
+        _log.write_text(traceback.format_exc(), encoding="utf-8")
+        raise
