@@ -1425,7 +1425,7 @@ class POTAHunter(tk.Tk):
         btn_row = tk.Frame(parent, bg=BG)
         btn_row.pack(fill="x", padx=10, pady=(4,8))
         bc = dict(font=LBL, relief="flat", cursor="hand2", pady=5, padx=16)
-        tk.Button(btn_row, text="⨁ Snipe QSO", bg=ACCENT, fg=BG,
+        tk.Button(btn_row, text="✜ Snipe QSO", bg=ACCENT, fg=BG,
                   command=self._log_qso, **bc).pack(side="left")
         tk.Button(btn_row, text="✕ Clear Form", bg=BG3, fg=FG2,
                   command=self._clear_form, **bc).pack(side="left", padx=8)
