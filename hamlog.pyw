@@ -560,7 +560,7 @@ def grid_to_latlon(gs):
 class POTAHunter(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("POTA Hunter")
+        self.title("POTA Hunter by n5eab")
         self.configure(bg=BG)
         self.minsize(1000, 640)
         self.resizable(True, True)
@@ -672,7 +672,7 @@ class POTAHunter(tk.Tk):
         # Top bar
         top = tk.Frame(self, bg=BG, pady=5)
         top.pack(fill="x", padx=14)
-        tk.Label(top, text="◈ POTA Hunter", bg=BG, fg=ACCENT, font=TITLE).pack(side="left")
+        tk.Label(top, text="◈ POTA Hunter by n5eab", bg=BG, fg=ACCENT, font=TITLE).pack(side="left")
         self._logbook_lbl = tk.Label(top, text="No logbook open", bg=BG, fg=FG2, font=SM)
         self._logbook_lbl.pack(side="left", padx=14)
         self._flrig_lbl = tk.Label(top, text="● Flrig: offline", bg=BG, fg=WARN, font=SM)
