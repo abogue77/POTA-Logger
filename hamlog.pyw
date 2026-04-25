@@ -753,15 +753,16 @@ class POTAHunter(tk.Tk):
         vi = tk.Frame(vfo_bar, bg=BG2)
         vi.pack(padx=12, pady=6, anchor="w")
         tk.Label(vi, text="RIG VFO", bg=BG2, fg=MUTED, font=SM).grid(row=0,column=0)
-        self._vfo_freq = tk.Label(vi, text="—", bg=BG2, fg=ACCENT, font=DISP)
+        self._vfo_freq = tk.Label(vi, text="—", bg=BG2, fg=ACCENT, font=DISP,
+                                  width=14, anchor="w")
         self._vfo_freq.grid(row=0,column=1,padx=(8,20))
         tk.Label(vi, text="MODE", bg=BG2, fg=MUTED, font=SM).grid(row=0,column=2)
         self._vfo_mode = tk.Label(vi, text="—", bg=BG2, fg=ACC2,
-                                  font=("Courier New",18,"bold"))
+                                  font=("Courier New",18,"bold"), width=8, anchor="w")
         self._vfo_mode.grid(row=0,column=3,padx=(6,20))
         tk.Label(vi, text="BAND", bg=BG2, fg=MUTED, font=SM).grid(row=0,column=4)
         self._vfo_band = tk.Label(vi, text="—", bg=BG2, fg=ACC3,
-                                  font=("Courier New",14,"bold"))
+                                  font=("Courier New",14,"bold"), width=5, anchor="w")
         self._vfo_band.grid(row=0,column=5,padx=(6,20))
         tk.Label(vi, text="← captured automatically on LOG QSO",
                  bg=BG2, fg=MUTED, font=SM).grid(row=0,column=6,padx=4)
