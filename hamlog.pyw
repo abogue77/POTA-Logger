@@ -364,6 +364,25 @@ def flrig_get(host, port):
     except Exception:
         return None, None
 
+def flrig_get_all(host, port):
+    """Single-session fetch: freq, mode, s-meter, power meter, PTT state."""
+    try:
+        proxy = xmlrpc.client.ServerProxy(
+            f"http://{host}:{port}/RPC2",
+            transport=_TimeoutTransport(timeout=2.0),
+            allow_none=True)
+        freq_hz  = proxy.rig.get_vfo()
+        mode     = proxy.rig.get_mode()
+        smeter   = proxy.rig.get_smeter()
+        pwrmeter = proxy.rig.get_pwrmeter()
+        try:
+            ptt = bool(proxy.rig.get_ptt())
+        except Exception:
+            ptt = pwrmeter is not None and float(pwrmeter) > 5
+        return freq_hz, mode, smeter, pwrmeter, ptt
+    except Exception:
+        return None, None, None, None, False
+
 def flrig_set_freq(host, port, freq_hz):
     """Returns True on success or an error string on failure."""
     try:
@@ -570,9 +589,11 @@ class POTAHunter(tk.Tk):
         self.adif_path     = ""
         self._map_poll_id    = None
         self._map_adif_mtime = None
-        self._flrig_freq_hz = None
-        self._flrig_mode    = None
-        self._flrig_poll_id = None
+        self._flrig_freq_hz  = None
+        self._flrig_mode     = None
+        self._flrig_poll_id  = None
+        self._meter_value    = 0
+        self._meter_is_tx    = False
         self._tune_suppress_until = 0.0
         self._pota_paused    = False
         self._pota_loaded    = False
@@ -701,6 +722,22 @@ class POTAHunter(tk.Tk):
         self._vfo_band.grid(row=0,column=5,padx=(6,20))
         tk.Label(vi, text="← captured automatically on LOG QSO",
                  bg=BG2, fg=MUTED, font=SM).grid(row=0,column=6,padx=4)
+
+        # S-meter / power-meter bar
+        meter_row = tk.Frame(vfo_bar, bg=BG2)
+        meter_row.pack(fill="x", padx=12, pady=(0,6))
+        self._meter_type_lbl = tk.Label(meter_row, text="S-METER", width=8,
+                                        anchor="w", bg=BG2, fg=MUTED, font=SM)
+        self._meter_type_lbl.pack(side="left")
+        self._meter_canvas = tk.Canvas(meter_row, height=14, bg=BG3,
+                                       bd=0, highlightthickness=0)
+        self._meter_canvas.pack(side="left", fill="x", expand=True, padx=(4,4))
+        self._meter_val_lbl = tk.Label(meter_row, text="  0%", width=5,
+                                       anchor="e", bg=BG2, fg=MUTED, font=SM)
+        self._meter_val_lbl.pack(side="left")
+        self._meter_canvas.bind("<Configure>",
+                                lambda e: self._draw_meter_bar(self._meter_value,
+                                                               self._meter_is_tx))
 
         # Entry form
         form_frame = tk.LabelFrame(self, text=" NEW QSO ", bg=BG, fg=ACCENT,
@@ -1848,13 +1885,15 @@ class POTAHunter(tk.Tk):
             host = self.cfg["flrig_host"]
             port = self.cfg["flrig_port"]
             def _fetch():
-                freq_hz, mode = flrig_get(host, port)
+                freq_hz, mode, smeter, pwrmeter, ptt = flrig_get_all(host, port)
                 self._flrig_polling = False
-                self.after(0, lambda: self._update_vfo_display(freq_hz, mode))
+                self.after(0, lambda: self._update_vfo_display(
+                    freq_hz, mode, smeter=smeter, pwrmeter=pwrmeter, ptt=ptt))
             threading.Thread(target=_fetch, daemon=True).start()
         self._flrig_poll_id = self.after(2000, self._do_flrig_poll)
 
-    def _update_vfo_display(self, freq_hz, mode, force=False):
+    def _update_vfo_display(self, freq_hz, mode, force=False,
+                            smeter=None, pwrmeter=None, ptt=False):
         suppressed = not force and time.monotonic() < self._tune_suppress_until
         if freq_hz is not None:
             if not suppressed:
@@ -1870,11 +1909,55 @@ class POTAHunter(tk.Tk):
                 self._vfo_band.config(text=band if band else "—", fg=ACC3)
                 self._refresh_pota_highlights()
             self._flrig_lbl.config(text="● Flrig: online", fg=ACC3)
+            self._update_meter_display(smeter, pwrmeter, ptt)
         else:
             self._vfo_freq.config(text="—", fg=MUTED)
             self._vfo_mode.config(text="—", fg=MUTED)
             self._vfo_band.config(text="—", fg=MUTED)
             self._flrig_lbl.config(text="● Flrig: offline", fg=WARN)
+            self._update_meter_display(None, None, False)
+
+    def _update_meter_display(self, smeter, pwrmeter, ptt):
+        is_tx = bool(ptt)
+        if is_tx:
+            raw = pwrmeter
+            label = "PWR OUT"
+        else:
+            raw = smeter
+            label = "S-METER"
+        try:
+            value = max(0, min(100, int(float(raw)))) if raw is not None else 0
+        except (TypeError, ValueError):
+            value = 0
+        self._meter_value = value
+        self._meter_is_tx = is_tx
+        fg_color = WARN if is_tx else ACC3
+        self._meter_type_lbl.config(text=label, fg=fg_color)
+        self._meter_val_lbl.config(text=f"{value:3d}%", fg=fg_color)
+        self._draw_meter_bar(value, is_tx)
+
+    def _draw_meter_bar(self, value, is_tx):
+        c = self._meter_canvas
+        c.delete("all")
+        w = c.winfo_width()
+        if w < 10:
+            return
+        h = c.winfo_height()
+        n_segs = 20
+        gap = 2
+        seg_w = (w - gap * (n_segs - 1)) / n_segs
+        lit_count = round(value / 100 * n_segs)
+        if is_tx:
+            lit_color = "#dd3333"
+            dim_color = "#2a0808"
+        else:
+            lit_color = "#22bb55"
+            dim_color = "#062010"
+        for i in range(n_segs):
+            x1 = i * (seg_w + gap)
+            x2 = x1 + seg_w
+            color = lit_color if i < lit_count else dim_color
+            c.create_rectangle(x1, 1, x2, h - 1, fill=color, outline="")
 
     # ── QRZ ───────────────────────────────────────────────────────────────
     def _qrz_login_bg(self):
