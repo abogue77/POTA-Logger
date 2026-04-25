@@ -1110,7 +1110,8 @@ class POTAHunter(tk.Tk):
         tb = tk.Frame(parent, bg=PBGK)
         tb.pack(fill="x", padx=6, pady=(4,2))
         tk.Label(tb, text="POTA ACTIVATORS", bg=PBGK, fg=ACCENT, font=LBL).pack(side="left")
-        self._pota_status_lbl = tk.Label(tb, text="Not loaded", bg=PBGK, fg=FG2, font=SM)
+        self._pota_status_lbl = tk.Label(tb, text="Not loaded", bg=PBGK, fg=FG2, font=SM,
+                                         width=38, anchor="w")
         self._pota_status_lbl.pack(side="left", padx=12)
         tk.Label(tb, text="Band:", bg=PBGK, fg=FG2, font=SM).pack(side="left", padx=(0, 2))
         self._pota_band_cb = ttk.Combobox(
@@ -1129,7 +1130,7 @@ class POTAHunter(tk.Tk):
             command=self._apply_pota_filters).pack(side="left", padx=(10, 0))
         self._pota_pause_btn = tk.Button(
             tb, text="⏸ Pause Updates", bg=BG3, fg=FG, font=SM,
-            relief="flat", cursor="hand2", padx=8,
+            relief="flat", cursor="hand2", padx=8, width=16,
             command=self._toggle_pota_pause)
         self._pota_pause_btn.pack(side="right")
         tk.Button(tb, text="⟳ Refresh", bg=BG3, fg=FG, font=SM,
@@ -1137,7 +1138,7 @@ class POTAHunter(tk.Tk):
                   command=self._manual_pota_refresh).pack(side="right", padx=6)
         self._pota_scan_btn = tk.Button(
             tb, text="▶ Scan", bg=BG3, fg=FG, font=SM,
-            relief="flat", cursor="hand2", padx=8,
+            relief="flat", cursor="hand2", padx=8, width=12,
             command=self._toggle_pota_scan)
         self._pota_scan_btn.pack(side="right", padx=6)
         ttk.Checkbutton(
