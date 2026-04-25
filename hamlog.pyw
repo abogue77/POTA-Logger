@@ -470,6 +470,36 @@ MODES = ["USB","LSB","SSB","AM","FM","FMN","CW","CWR","RTTY","RTTYR",
 BANDS = ["160m","80m","60m","40m","30m","20m","17m","15m","12m","10m",
          "6m","2m","70cm","SAT","Other"]
 
+def _make_reticle_img(size, fg_hex, bg_hex):
+    """Return a tk.PhotoImage of a scope reticle (crosshair + circle)."""
+    import math, base64
+    def _rgb(h):
+        h = h.lstrip('#')
+        return (int(h[0:2],16), int(h[2:4],16), int(h[4:6],16))
+    fg, bg = _rgb(fg_hex), _rgb(bg_hex)
+    buf = bytearray(bytes(bg) * size * size)
+    def put(x, y):
+        if 0 <= x < size and 0 <= y < size:
+            i = (y * size + x) * 3
+            buf[i:i+3] = bytes(fg)
+    cx = cy = size // 2
+    gap = 3          # clear pixels around centre so lines don't overlap circle
+    radius = size // 2 - 2
+    for x in range(size):                    # horizontal arm
+        if abs(x - cx) > gap:
+            for dy in (-1, 0, 1):
+                put(x, cy + dy)
+    for y in range(size):                    # vertical arm
+        if abs(y - cy) > gap:
+            for dx in (-1, 0, 1):
+                put(cx + dx, y)
+    for a in range(720):                     # circle (2× resolution → fewer gaps)
+        rad = math.radians(a / 2)
+        put(int(round(cx + radius * math.cos(rad))),
+            int(round(cy + radius * math.sin(rad))))
+    ppm = f"P6\n{size} {size}\n255\n".encode() + bytes(buf)
+    return tk.PhotoImage(data=base64.b64encode(ppm).decode())
+
 # ── Simplified world coastline outlines (lon, lat) ────────────────────────────
 # Each sub-list is one polyline drawn on the map canvas.
 WORLD_OUTLINE = [
@@ -1462,7 +1492,9 @@ class POTAHunter(tk.Tk):
         btn_row = tk.Frame(parent, bg=BG)
         btn_row.pack(fill="x", padx=10, pady=(4,8))
         bc = dict(font=LBL, relief="flat", cursor="hand2", pady=5, padx=16)
-        tk.Button(btn_row, text="🎯 Snipe QSO", bg=ACCENT, fg=BG,
+        self._reticle_img = _make_reticle_img(20, BG, ACCENT)
+        tk.Button(btn_row, text=" Snipe QSO", image=self._reticle_img,
+                  compound="left", bg=ACCENT, fg=BG,
                   command=self._log_qso, **bc).pack(side="left")
         tk.Button(btn_row, text="✕ Clear Form", bg=BG3, fg=FG2,
                   command=self._clear_form, **bc).pack(side="left", padx=8)
