@@ -364,6 +364,25 @@ def flrig_get(host, port):
     except Exception:
         return None, None
 
+def flrig_get_all(host, port):
+    """Single-session fetch: freq, mode, s-meter, power meter, PTT state."""
+    try:
+        proxy = xmlrpc.client.ServerProxy(
+            f"http://{host}:{port}/RPC2",
+            transport=_TimeoutTransport(timeout=2.0),
+            allow_none=True)
+        freq_hz  = proxy.rig.get_vfo()
+        mode     = proxy.rig.get_mode()
+        smeter   = proxy.rig.get_smeter()
+        pwrmeter = proxy.rig.get_pwrmeter()
+        try:
+            ptt = bool(proxy.rig.get_ptt())
+        except Exception:
+            ptt = pwrmeter is not None and float(pwrmeter) > 5
+        return freq_hz, mode, smeter, pwrmeter, ptt
+    except Exception:
+        return None, None, None, None, False
+
 def flrig_set_freq(host, port, freq_hz):
     """Returns True on success or an error string on failure."""
     try:
@@ -417,7 +436,7 @@ def qrz_lookup(call):
 DARK_PALETTE = {
     "BG": "#111318", "BG2": "#1a1d24", "BG3": "#22262f", "BG4": "#2a2f3a",
     "ACCENT": "#e8a020", "ACC2": "#4fc3f7", "ACC3": "#81c995",
-    "WARN": "#f28b82", "MUTED": "#555e6e", "FG": "#dde3ee", "FG2": "#8c95a6",
+    "WARN": "#f28b82", "YELLOW": "#d4c020", "MUTED": "#555e6e", "FG": "#dde3ee", "FG2": "#8c95a6",
     "SEL": "#2d3a52",
     "MAP_BG": "#0a0e17", "MAP_GRID": "#151c28", "MAP_GRID2": "#2a3347",
     "MAP_COAST": "#1e3a5f", "MAP_GLOW": "#5a3010",
@@ -426,7 +445,7 @@ DARK_PALETTE = {
 LIGHT_PALETTE = {
     "BG": "#f5f7fa", "BG2": "#eaecf2", "BG3": "#dde1ea", "BG4": "#ced3df",
     "ACCENT": "#b07800", "ACC2": "#0066aa", "ACC3": "#2a7a30",
-    "WARN": "#cc2222", "MUTED": "#7a8599", "FG": "#1a1d24", "FG2": "#4a5568",
+    "WARN": "#cc2222", "YELLOW": "#b8a000", "MUTED": "#7a8599", "FG": "#1a1d24", "FG2": "#4a5568",
     "SEL": "#b3c9e8",
     "MAP_BG": "#d0dce8", "MAP_GRID": "#b0c4d8", "MAP_GRID2": "#8aaac8",
     "MAP_COAST": "#4a7ab0", "MAP_GLOW": "#d4a040",
@@ -450,6 +469,49 @@ MODES = ["USB","LSB","SSB","AM","FM","FMN","CW","CWR","RTTY","RTTYR",
          "PKTUSB","PKTLSB","PKTFM","JS8","FT8","FT4","PSK31","OLIVIA","HELL"]
 BANDS = ["160m","80m","60m","40m","30m","20m","17m","15m","12m","10m",
          "6m","2m","70cm","SAT","Other"]
+
+def _make_reticle_img(size, fg_hex, bg_hex):
+    """Return a tk.PhotoImage of a scope reticle (crosshair + circle), encoded as PNG."""
+    import math, struct, zlib, base64
+    def _rgb(h):
+        h = h.lstrip('#')
+        return (int(h[0:2],16), int(h[2:4],16), int(h[4:6],16))
+    fg, bg = _rgb(fg_hex), _rgb(bg_hex)
+    buf = bytearray()
+    for _ in range(size * size):
+        buf.extend(bg)
+    def put(x, y):
+        if 0 <= x < size and 0 <= y < size:
+            i = (y * size + x) * 3
+            buf[i:i+3] = bytes(fg)
+    cx = cy = size // 2
+    gap = 3
+    radius = size // 2 - 2
+    for x in range(size):
+        if abs(x - cx) > gap:
+            for dy in (-1, 0, 1):
+                put(x, cy + dy)
+    for y in range(size):
+        if abs(y - cy) > gap:
+            for dx in (-1, 0, 1):
+                put(cx + dx, y)
+    for a in range(720):
+        rad = math.radians(a / 2)
+        put(int(round(cx + radius * math.cos(rad))),
+            int(round(cy + radius * math.sin(rad))))
+    def _png_chunk(tag, data):
+        c = tag + data
+        return struct.pack('>I', len(data)) + c + struct.pack('>I', zlib.crc32(c) & 0xffffffff)
+    ihdr = struct.pack('>IIBBBBB', size, size, 8, 2, 0, 0, 0)
+    raw = bytearray()
+    for y in range(size):
+        raw.append(0)
+        raw.extend(buf[y * size * 3:(y + 1) * size * 3])
+    png = (b'\x89PNG\r\n\x1a\n'
+           + _png_chunk(b'IHDR', ihdr)
+           + _png_chunk(b'IDAT', zlib.compress(bytes(raw)))
+           + _png_chunk(b'IEND', b''))
+    return tk.PhotoImage(data=base64.b64encode(png).decode())
 
 # ── Simplified world coastline outlines (lon, lat) ────────────────────────────
 # Each sub-list is one polyline drawn on the map canvas.
@@ -560,7 +622,7 @@ def grid_to_latlon(gs):
 class POTAHunter(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("POTA Hunter")
+        self.title("POTA Hunter by n5eab")
         self.configure(bg=BG)
         self.minsize(1000, 640)
         self.resizable(True, True)
@@ -570,14 +632,18 @@ class POTAHunter(tk.Tk):
         self.adif_path     = ""
         self._map_poll_id    = None
         self._map_adif_mtime = None
-        self._flrig_freq_hz = None
-        self._flrig_mode    = None
-        self._flrig_poll_id = None
+        self._flrig_freq_hz  = None
+        self._flrig_mode     = None
+        self._flrig_poll_id  = None
+        self._meter_value    = 0
+        self._meter_is_tx    = False
         self._tune_suppress_until = 0.0
         self._pota_paused    = False
         self._pota_loaded    = False
         self._pota_after_id  = None
         self._pota_spots_raw = []
+        self._freq_check_var    = tk.StringVar()
+        self._freq_check_border = None
         self._pota_band_var  = tk.StringVar(value="All")
         self._pota_mode_var  = tk.StringVar(value="All")
         self._pota_hide_qrt  = tk.BooleanVar(value=False)
@@ -672,7 +738,7 @@ class POTAHunter(tk.Tk):
         # Top bar
         top = tk.Frame(self, bg=BG, pady=5)
         top.pack(fill="x", padx=14)
-        tk.Label(top, text="◈ POTA Hunter", bg=BG, fg=ACCENT, font=TITLE).pack(side="left")
+        tk.Label(top, text="◈ POTA Hunter by n5eab", bg=BG, fg=ACCENT, font=TITLE).pack(side="left")
         self._logbook_lbl = tk.Label(top, text="No logbook open", bg=BG, fg=FG2, font=SM)
         self._logbook_lbl.pack(side="left", padx=14)
         self._flrig_lbl = tk.Label(top, text="● Flrig: offline", bg=BG, fg=WARN, font=SM)
@@ -689,18 +755,35 @@ class POTAHunter(tk.Tk):
         vi = tk.Frame(vfo_bar, bg=BG2)
         vi.pack(padx=12, pady=6, anchor="w")
         tk.Label(vi, text="RIG VFO", bg=BG2, fg=MUTED, font=SM).grid(row=0,column=0)
-        self._vfo_freq = tk.Label(vi, text="—", bg=BG2, fg=ACCENT, font=DISP)
+        self._vfo_freq = tk.Label(vi, text="—", bg=BG2, fg=ACCENT, font=DISP,
+                                  width=14, anchor="w")
         self._vfo_freq.grid(row=0,column=1,padx=(8,20))
         tk.Label(vi, text="MODE", bg=BG2, fg=MUTED, font=SM).grid(row=0,column=2)
         self._vfo_mode = tk.Label(vi, text="—", bg=BG2, fg=ACC2,
-                                  font=("Courier New",18,"bold"))
+                                  font=("Courier New",18,"bold"), width=8, anchor="w")
         self._vfo_mode.grid(row=0,column=3,padx=(6,20))
         tk.Label(vi, text="BAND", bg=BG2, fg=MUTED, font=SM).grid(row=0,column=4)
         self._vfo_band = tk.Label(vi, text="—", bg=BG2, fg=ACC3,
-                                  font=("Courier New",14,"bold"))
+                                  font=("Courier New",14,"bold"), width=5, anchor="w")
         self._vfo_band.grid(row=0,column=5,padx=(6,20))
         tk.Label(vi, text="← captured automatically on LOG QSO",
                  bg=BG2, fg=MUTED, font=SM).grid(row=0,column=6,padx=4)
+
+        # S-meter / power-meter bar
+        meter_row = tk.Frame(vfo_bar, bg=BG2)
+        meter_row.pack(fill="x", padx=12, pady=(0,6))
+        self._meter_type_lbl = tk.Label(meter_row, text="S-METER", width=8,
+                                        anchor="w", bg=BG2, fg=MUTED, font=SM)
+        self._meter_type_lbl.pack(side="left")
+        self._meter_canvas = tk.Canvas(meter_row, height=14, bg=BG3,
+                                       bd=0, highlightthickness=0)
+        self._meter_canvas.pack(side="left", fill="x", expand=True, padx=(4,4))
+        self._meter_val_lbl = tk.Label(meter_row, text="  0%", width=5,
+                                       anchor="e", bg=BG2, fg=MUTED, font=SM)
+        self._meter_val_lbl.pack(side="left")
+        self._meter_canvas.bind("<Configure>",
+                                lambda e: self._draw_meter_bar(self._meter_value,
+                                                               self._meter_is_tx))
 
         # Entry form
         form_frame = tk.LabelFrame(self, text=" NEW QSO ", bg=BG, fg=ACCENT,
@@ -1030,7 +1113,8 @@ class POTAHunter(tk.Tk):
         tb = tk.Frame(parent, bg=PBGK)
         tb.pack(fill="x", padx=6, pady=(4,2))
         tk.Label(tb, text="POTA ACTIVATORS", bg=PBGK, fg=ACCENT, font=LBL).pack(side="left")
-        self._pota_status_lbl = tk.Label(tb, text="Not loaded", bg=PBGK, fg=FG2, font=SM)
+        self._pota_status_lbl = tk.Label(tb, text="Not loaded", bg=PBGK, fg=FG2, font=SM,
+                                         width=38, anchor="w")
         self._pota_status_lbl.pack(side="left", padx=12)
         tk.Label(tb, text="Band:", bg=PBGK, fg=FG2, font=SM).pack(side="left", padx=(0, 2))
         self._pota_band_cb = ttk.Combobox(
@@ -1049,7 +1133,7 @@ class POTAHunter(tk.Tk):
             command=self._apply_pota_filters).pack(side="left", padx=(10, 0))
         self._pota_pause_btn = tk.Button(
             tb, text="⏸ Pause Updates", bg=BG3, fg=FG, font=SM,
-            relief="flat", cursor="hand2", padx=8,
+            relief="flat", cursor="hand2", padx=8, width=16,
             command=self._toggle_pota_pause)
         self._pota_pause_btn.pack(side="right")
         tk.Button(tb, text="⟳ Refresh", bg=BG3, fg=FG, font=SM,
@@ -1057,7 +1141,7 @@ class POTAHunter(tk.Tk):
                   command=self._manual_pota_refresh).pack(side="right", padx=6)
         self._pota_scan_btn = tk.Button(
             tb, text="▶ Scan", bg=BG3, fg=FG, font=SM,
-            relief="flat", cursor="hand2", padx=8,
+            relief="flat", cursor="hand2", padx=8, width=12,
             command=self._toggle_pota_scan)
         self._pota_scan_btn.pack(side="right", padx=6)
         ttk.Checkbutton(
@@ -1182,6 +1266,7 @@ class POTAHunter(tk.Tk):
         values = self._pota_tree.item(sel[0], "values")
         activator = values[0]
         park      = values[1]
+        park_name = values[2]  # Park name from POTA API
         freq_str  = values[3]
 
         # Populate QSO entry fields
@@ -1189,6 +1274,18 @@ class POTAHunter(tk.Tk):
         self.e_call.insert(0, activator.upper())
         self.e_park.delete(0, "end")
         self.e_park.insert(0, park)
+
+        # Look up park in database and populate grid square
+        park_data = lookup_park(park)
+        if park_data and park_data.get("grid"):
+            self.e_grid.delete(0, "end")
+            self.e_grid.insert(0, park_data["grid"][:4])  # Maidenhead grid square (4 characters)
+        
+        # Update park info label with park name from spot data
+        if park_name:
+            self._park_info_lbl.config(text=f"{park_name} ({park})", fg=ACC3)
+        else:
+            self._park_info_lbl.config(text=f"Park {park}", fg=MUTED)
 
         # Tune radio — POTA API returns frequency in kHz (e.g. 14225 = 14.225 MHz)
         try:
@@ -1237,6 +1334,7 @@ class POTAHunter(tk.Tk):
             self._pota_tree.insert("", "end",
                 values=(act, park, pname, freq, mode, stime, cmts))
         self._refresh_pota_highlights()
+        self._check_freq_conflict()
         now = datetime.datetime.utcnow().strftime("%H:%M:%Sz")
         self._pota_status_lbl.config(
             text=f"● {len(spots)} activators  last updated {now}", fg=ACC3)
@@ -1400,9 +1498,11 @@ class POTAHunter(tk.Tk):
 
         info_row = tk.Frame(parent, bg=BG)
         info_row.pack(fill="x", padx=10, pady=(2,0))
-        self._qrz_info_lbl = tk.Label(info_row, text="", bg=BG, fg=ACC3, font=SM)
+        self._qrz_info_lbl = tk.Label(info_row, text="", bg=BG, fg=ACC3, font=SM,
+                                       width=40, anchor="w")
         self._qrz_info_lbl.pack(side="left")
-        self._park_info_lbl = tk.Label(info_row, text="", bg=BG, fg=MUTED, font=SM)
+        self._park_info_lbl = tk.Label(info_row, text="", bg=BG, fg=MUTED, font=SM,
+                                       width=50, anchor="w")
         self._park_info_lbl.pack(side="left", padx=(12, 0))
         self._rig_snap_lbl = tk.Label(info_row,
             text="Freq / Band / Mode will be captured from Flrig when LOG QSO is pressed.",
@@ -1412,10 +1512,22 @@ class POTAHunter(tk.Tk):
         btn_row = tk.Frame(parent, bg=BG)
         btn_row.pack(fill="x", padx=10, pady=(4,8))
         bc = dict(font=LBL, relief="flat", cursor="hand2", pady=5, padx=16)
-        tk.Button(btn_row, text="✚ LOG QSO", bg=ACCENT, fg=BG,
+        self._reticle_img = _make_reticle_img(20, BG, ACCENT)
+        tk.Button(btn_row, text=" Snipe QSO", image=self._reticle_img,
+                  compound="left", bg=ACCENT, fg=BG,
                   command=self._log_qso, **bc).pack(side="left")
         tk.Button(btn_row, text="✕ Clear Form", bg=BG3, fg=FG2,
                   command=self._clear_form, **bc).pack(side="left", padx=8)
+
+        tk.Label(btn_row, text="Check for clear freq kHz:", bg=BG, fg=FG2, font=LBL).pack(side="left", padx=(12, 2))
+        self._freq_check_border = tk.Frame(btn_row, bg=MUTED)
+        self._freq_check_border.pack(side="left")
+        freq_entry = tk.Entry(self._freq_check_border, textvariable=self._freq_check_var, width=7,
+                              bg=BG2, fg=FG, insertbackground=FG, font=LBL,
+                              bd=0, highlightthickness=0)
+        freq_entry.pack(padx=3, pady=3)
+        freq_entry.bind("<Return>", lambda _: self._check_freq_conflict())
+        freq_entry.bind("<KeyRelease>", lambda e: self._reset_freq_border() if e.keysym != "Return" else None)
 
         self.e_call.focus_set()
 
@@ -1483,6 +1595,39 @@ class POTAHunter(tk.Tk):
         self._qrz_info_lbl.config(text="")
         self._park_info_lbl.config(text="", fg=MUTED)
         self.e_call.focus_set()
+
+    def _reset_freq_border(self):
+        if self._freq_check_border is not None:
+            self._freq_check_border.config(bg=MUTED)
+
+    def _check_freq_conflict(self):
+        if self._freq_check_border is None:
+            return
+        raw = self._freq_check_var.get().strip()
+        if not raw:
+            self._freq_check_border.config(bg=MUTED)
+            return
+        try:
+            entered_khz = float(raw)
+        except ValueError:
+            self._freq_check_border.config(bg=MUTED)
+            return
+        valid = [float(s.get("frequency", s.get("freq", 0)))
+                 for s in self._pota_spots_raw
+                 if s.get("frequency", s.get("freq")) not in (None, "", 0)]
+        if not valid:
+            self._freq_check_border.config(bg=MUTED)
+            return
+        min_dist = min(abs(entered_khz - f) for f in valid)
+        if min_dist < 1:
+            color = WARN    # red   — 0.0–0.9 kHz
+        elif min_dist < 2:
+            color = ACCENT  # orange — 1.0–1.9 kHz
+        elif min_dist < 3:
+            color = YELLOW  # yellow — 2.0–2.9 kHz
+        else:
+            color = ACC3    # green  — 3.0+ kHz
+        self._freq_check_border.config(bg=color)
 
     # ── Log QSO ───────────────────────────────────────────────────────────
     def _log_qso(self, _=None):
@@ -1835,13 +1980,15 @@ class POTAHunter(tk.Tk):
             host = self.cfg["flrig_host"]
             port = self.cfg["flrig_port"]
             def _fetch():
-                freq_hz, mode = flrig_get(host, port)
+                freq_hz, mode, smeter, pwrmeter, ptt = flrig_get_all(host, port)
                 self._flrig_polling = False
-                self.after(0, lambda: self._update_vfo_display(freq_hz, mode))
+                self.after(0, lambda: self._update_vfo_display(
+                    freq_hz, mode, smeter=smeter, pwrmeter=pwrmeter, ptt=ptt))
             threading.Thread(target=_fetch, daemon=True).start()
         self._flrig_poll_id = self.after(2000, self._do_flrig_poll)
 
-    def _update_vfo_display(self, freq_hz, mode, force=False):
+    def _update_vfo_display(self, freq_hz, mode, force=False,
+                            smeter=None, pwrmeter=None, ptt=False):
         suppressed = not force and time.monotonic() < self._tune_suppress_until
         if freq_hz is not None:
             if not suppressed:
@@ -1857,11 +2004,55 @@ class POTAHunter(tk.Tk):
                 self._vfo_band.config(text=band if band else "—", fg=ACC3)
                 self._refresh_pota_highlights()
             self._flrig_lbl.config(text="● Flrig: online", fg=ACC3)
+            self._update_meter_display(smeter, pwrmeter, ptt)
         else:
             self._vfo_freq.config(text="—", fg=MUTED)
             self._vfo_mode.config(text="—", fg=MUTED)
             self._vfo_band.config(text="—", fg=MUTED)
             self._flrig_lbl.config(text="● Flrig: offline", fg=WARN)
+            self._update_meter_display(None, None, False)
+
+    def _update_meter_display(self, smeter, pwrmeter, ptt):
+        is_tx = bool(ptt)
+        if is_tx:
+            raw = pwrmeter
+            label = "PWR OUT"
+        else:
+            raw = smeter
+            label = "S-METER"
+        try:
+            value = max(0, min(100, int(float(raw)))) if raw is not None else 0
+        except (TypeError, ValueError):
+            value = 0
+        self._meter_value = value
+        self._meter_is_tx = is_tx
+        fg_color = WARN if is_tx else ACC3
+        self._meter_type_lbl.config(text=label, fg=fg_color)
+        self._meter_val_lbl.config(text=f"{value:3d}%", fg=fg_color)
+        self._draw_meter_bar(value, is_tx)
+
+    def _draw_meter_bar(self, value, is_tx):
+        c = self._meter_canvas
+        c.delete("all")
+        w = c.winfo_width()
+        if w < 10:
+            return
+        h = c.winfo_height()
+        n_segs = 20
+        gap = 2
+        seg_w = (w - gap * (n_segs - 1)) / n_segs
+        lit_count = round(value / 100 * n_segs)
+        if is_tx:
+            lit_color = "#dd3333"
+            dim_color = "#2a0808"
+        else:
+            lit_color = "#22bb55"
+            dim_color = "#062010"
+        for i in range(n_segs):
+            x1 = i * (seg_w + gap)
+            x2 = x1 + seg_w
+            color = lit_color if i < lit_count else dim_color
+            c.create_rectangle(x1, 1, x2, h - 1, fill=color, outline="")
 
     # ── QRZ ───────────────────────────────────────────────────────────────
     def _qrz_login_bg(self):
