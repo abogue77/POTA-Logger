@@ -436,7 +436,7 @@ def qrz_lookup(call):
 DARK_PALETTE = {
     "BG": "#111318", "BG2": "#1a1d24", "BG3": "#22262f", "BG4": "#2a2f3a",
     "ACCENT": "#e8a020", "ACC2": "#4fc3f7", "ACC3": "#81c995",
-    "WARN": "#f28b82", "MUTED": "#555e6e", "FG": "#dde3ee", "FG2": "#8c95a6",
+    "WARN": "#f28b82", "YELLOW": "#d4c020", "MUTED": "#555e6e", "FG": "#dde3ee", "FG2": "#8c95a6",
     "SEL": "#2d3a52",
     "MAP_BG": "#0a0e17", "MAP_GRID": "#151c28", "MAP_GRID2": "#2a3347",
     "MAP_COAST": "#1e3a5f", "MAP_GLOW": "#5a3010",
@@ -445,7 +445,7 @@ DARK_PALETTE = {
 LIGHT_PALETTE = {
     "BG": "#f5f7fa", "BG2": "#eaecf2", "BG3": "#dde1ea", "BG4": "#ced3df",
     "ACCENT": "#b07800", "ACC2": "#0066aa", "ACC3": "#2a7a30",
-    "WARN": "#cc2222", "MUTED": "#7a8599", "FG": "#1a1d24", "FG2": "#4a5568",
+    "WARN": "#cc2222", "YELLOW": "#b8a000", "MUTED": "#7a8599", "FG": "#1a1d24", "FG2": "#4a5568",
     "SEL": "#b3c9e8",
     "MAP_BG": "#d0dce8", "MAP_GRID": "#b0c4d8", "MAP_GRID2": "#8aaac8",
     "MAP_COAST": "#4a7ab0", "MAP_GLOW": "#d4a040",
@@ -642,6 +642,8 @@ class POTAHunter(tk.Tk):
         self._pota_loaded    = False
         self._pota_after_id  = None
         self._pota_spots_raw = []
+        self._freq_check_var = tk.StringVar()
+        self._freq_check_lbl = None
         self._pota_band_var  = tk.StringVar(value="All")
         self._pota_mode_var  = tk.StringVar(value="All")
         self._pota_hide_qrt  = tk.BooleanVar(value=False)
@@ -1332,6 +1334,7 @@ class POTAHunter(tk.Tk):
             self._pota_tree.insert("", "end",
                 values=(act, park, pname, freq, mode, stime, cmts))
         self._refresh_pota_highlights()
+        self._check_freq_conflict()
         now = datetime.datetime.utcnow().strftime("%H:%M:%Sz")
         self._pota_status_lbl.config(
             text=f"● {len(spots)} activators  last updated {now}", fg=ACC3)
@@ -1516,6 +1519,14 @@ class POTAHunter(tk.Tk):
         tk.Button(btn_row, text="✕ Clear Form", bg=BG3, fg=FG2,
                   command=self._clear_form, **bc).pack(side="left", padx=8)
 
+        tk.Label(btn_row, text="Freq kHz:", bg=BG, fg=FG2, font=LBL).pack(side="left", padx=(12, 2))
+        freq_entry = tk.Entry(btn_row, textvariable=self._freq_check_var, width=7,
+                              bg=BG2, fg=FG, insertbackground=FG, font=LBL, relief="flat")
+        freq_entry.pack(side="left")
+        self._freq_check_lbl = tk.Label(btn_row, text="  ●  ", bg=BG, fg=MUTED, font=LBL)
+        self._freq_check_lbl.pack(side="left", padx=(4, 0))
+        self._freq_check_var.trace_add("write", lambda *_: self._check_freq_conflict())
+
         self.e_call.focus_set()
 
     # ── Form helpers ──────────────────────────────────────────────────────
@@ -1582,6 +1593,35 @@ class POTAHunter(tk.Tk):
         self._qrz_info_lbl.config(text="")
         self._park_info_lbl.config(text="", fg=MUTED)
         self.e_call.focus_set()
+
+    def _check_freq_conflict(self):
+        if self._freq_check_lbl is None:
+            return
+        raw = self._freq_check_var.get().strip()
+        if not raw:
+            self._freq_check_lbl.config(fg=MUTED)
+            return
+        try:
+            entered_khz = float(raw)
+        except ValueError:
+            self._freq_check_lbl.config(fg=MUTED)
+            return
+        valid = [float(s.get("frequency", s.get("freq", 0)))
+                 for s in self._pota_spots_raw
+                 if s.get("frequency", s.get("freq")) not in (None, "", 0)]
+        if not valid:
+            self._freq_check_lbl.config(fg=MUTED)
+            return
+        min_dist = min(abs(entered_khz - f) for f in valid)
+        if min_dist < 1:
+            color = WARN    # red   — 0.0–0.9 kHz
+        elif min_dist < 2:
+            color = ACCENT  # orange — 1.0–1.9 kHz
+        elif min_dist < 3:
+            color = YELLOW  # yellow — 2.0–2.9 kHz
+        else:
+            color = ACC3    # green  — 3.0+ kHz
+        self._freq_check_lbl.config(fg=color)
 
     # ── Log QSO ───────────────────────────────────────────────────────────
     def _log_qso(self, _=None):
