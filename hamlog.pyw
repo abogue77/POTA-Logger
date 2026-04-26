@@ -635,13 +635,19 @@ WORLD_OUTLINE = [
 
 # ── Maidenhead grid decoder ───────────────────────────────────────────────────
 def grid_to_latlon(gs):
-    """Return (lat, lon) center of a 4-char Maidenhead grid square."""
+    """Return (lat, lon) center of a 4- or 6-char Maidenhead grid square."""
     gs = (gs or "").strip().upper()
     if len(gs) < 4:
         return None, None
     try:
-        lon = (ord(gs[0]) - ord('A')) * 20 - 180 + int(gs[2]) * 2 + 1
-        lat = (ord(gs[1]) - ord('A')) * 10 - 90  + int(gs[3]) * 1 + 0.5
+        lon = (ord(gs[0]) - ord('A')) * 20 - 180 + int(gs[2]) * 2
+        lat = (ord(gs[1]) - ord('A')) * 10 - 90  + int(gs[3]) * 1
+        if len(gs) >= 6:
+            lon += (ord(gs[4].lower()) - ord('a')) * (5 / 60) + (2.5 / 60)
+            lat += (ord(gs[5].lower()) - ord('a')) * (2.5 / 60) + (1.25 / 60)
+        else:
+            lon += 1.0
+            lat += 0.5
         return lat, lon
     except (ValueError, IndexError):
         return None, None
@@ -683,9 +689,24 @@ class POTAHunter(tk.Tk):
         self._pota_scan_skip_worked  = tk.BooleanVar(value=False)
         self._pota_spot_ctx          = None
         self._pota_respot_enabled    = tk.BooleanVar(value=False)
-        self._map_markers   = {}
-        self._map_drawn     = False
-        self._map_resize_id = None
+        self._map_markers       = {}
+        self._map_drawn         = False
+        self._map_resize_id     = None
+        self._map_show_spots    = tk.BooleanVar(value=True)
+        self._map_zoom          = 1.0
+        self._map_pan_x         = 0.0
+        self._map_pan_y         = 0.0
+        self._map_drag_start    = None
+        self._map_flash_state   = False
+        self._map_flash_id      = None
+        self._map_flash_grids   = set()
+        self._map_marker_items  = {}
+        self._map_scan_blink_st = False
+        self._map_scan_blink_id = None
+        self._map_beam_id       = None
+        self._map_beam_phase    = 0
+        self._map_my_px         = None
+        self._map_tuned_px      = None
 
         self._style_ttk()
         self._build_menu()
@@ -918,14 +939,20 @@ class POTAHunter(tk.Tk):
         tk.Label(tb, text="GRID MAP", bg=MAP_BG, fg=ACCENT, font=LBL).pack(side="left")
         self._map_count_lbl = tk.Label(tb, text="", bg=MAP_BG, fg=FG2, font=SM)
         self._map_count_lbl.pack(side="left", padx=12)
-        tk.Button(tb, text="⟳ Refresh", bg=BG3, fg=FG, font=SM,
-                  relief="flat", cursor="hand2", padx=8,
-                  command=self._refresh_map).pack(side="right")
-        tk.Button(tb, text="Open in Browser", bg=BG3, fg=FG, font=SM,
-                  relief="flat", cursor="hand2", padx=8,
-                  command=self._open_leaflet_map).pack(side="right", padx=6)
-        tk.Label(tb, text="Hover over a marker to see callsigns",
-                 bg=MAP_BG, fg=MUTED, font=SM).pack(side="right", padx=10)
+        ttk.Checkbutton(tb, text="Show Spots", variable=self._map_show_spots,
+                        command=self._refresh_map).pack(side="left", padx=(4, 0))
+
+        btn_kw = dict(bg=BG3, fg=FG, font=SM, relief="flat", cursor="hand2", padx=8)
+        tk.Button(tb, text="⟳ Refresh", command=self._refresh_map,
+                  **btn_kw).pack(side="right")
+        tk.Button(tb, text="Open in Browser", command=self._open_leaflet_map,
+                  **btn_kw).pack(side="right", padx=6)
+        tk.Button(tb, text="⌂", command=self._map_zoom_reset,
+                  **btn_kw).pack(side="right", padx=(0, 2))
+        tk.Button(tb, text=" + ", command=self._map_zoom_in,
+                  **btn_kw).pack(side="right", padx=(0, 2))
+        tk.Button(tb, text=" − ", command=self._map_zoom_out,
+                  **btn_kw).pack(side="right", padx=(0, 2))
 
         # Canvas
         self._map_canvas = tk.Canvas(parent, bg=MAP_BG,
@@ -937,9 +964,15 @@ class POTAHunter(tk.Tk):
                                      font=SM, relief="flat", bd=0,
                                      padx=6, pady=3)
 
-        self._map_canvas.bind("<Configure>", self._on_map_resize)
-        self._map_canvas.bind("<Motion>",    self._on_map_motion)
-        self._map_canvas.bind("<Leave>",     lambda _: self._map_tooltip.place_forget())
+        self._map_canvas.bind("<Configure>",      self._on_map_resize)
+        self._map_canvas.bind("<Motion>",          self._on_map_motion)
+        self._map_canvas.bind("<Leave>",           lambda _: self._map_tooltip.place_forget())
+        self._map_canvas.bind("<MouseWheel>",      self._on_map_scroll)
+        self._map_canvas.bind("<Button-4>",        self._on_map_scroll)
+        self._map_canvas.bind("<Button-5>",        self._on_map_scroll)
+        self._map_canvas.bind("<ButtonPress-1>",   self._on_map_drag_start)
+        self._map_canvas.bind("<B1-Motion>",       self._on_map_drag)
+        self._map_canvas.bind("<ButtonRelease-1>", self._on_map_drag_end)
 
     def _on_map_resize(self, _=None):
         if self._map_resize_id:
@@ -955,8 +988,8 @@ class POTAHunter(tk.Tk):
         canvas.delete("all")
 
         def px(lon, lat):
-            x = (lon + 180) / 360 * W
-            y = (90  - lat) / 180 * H
+            x = (lon + 180) / 360 * W * self._map_zoom + self._map_pan_x
+            y = (90  - lat) / 180 * H * self._map_zoom + self._map_pan_y
             return x, y
 
         # Faint Maidenhead grid lines
@@ -1020,7 +1053,7 @@ class POTAHunter(tk.Tk):
         records = parse_adif_records(text)
         groups = {}
         for rec in records:
-            raw_gs = (rec.get("GRIDSQUARE", "") or rec.get("GRID", "")).strip().upper()[:4]
+            raw_gs = (rec.get("GRIDSQUARE", "") or rec.get("GRID", "")).strip().upper()[:6]
             if len(raw_gs) < 4:
                 continue
             call = rec.get("CALL", "").strip()
@@ -1035,32 +1068,166 @@ class POTAHunter(tk.Tk):
     def _draw_map_markers(self, W, H):
         canvas = self._map_canvas
         canvas.delete("marker")
+        canvas.delete("mymarker")
         self._map_markers = {}
+        self._map_marker_items = {}
 
-        rows = self._read_adif_grids()
+        def mpx(lon, lat):
+            x = (lon + 180) / 360 * W * self._map_zoom + self._map_pan_x
+            y = (90  - lat) / 180 * H * self._map_zoom + self._map_pan_y
+            return x, y
 
-        for row in rows:
-            gs = row["gs"]
+        # ── Logged QSO grids ────────────────────────────────────────────
+        qso_rows = self._read_adif_grids()
+        logged_gs = {r["gs"] for r in qso_rows}
+        qso_info  = {r["gs"]: r for r in qso_rows}
+
+        # ── Active POTA spot grids ───────────────────────────────────────
+        spot_gs_map  = {}   # gs → list of activator callsigns
+        tuned_gs     = set()
+        if self._map_show_spots.get() and self._pota_spots_raw:
+            refs = list({s.get("reference", s.get("parkReference", ""))
+                         for s in self._pota_spots_raw})
+            if refs:
+                placeholders = ",".join("?" * len(refs))
+                try:
+                    park_rows = self.conn.execute(
+                        f"SELECT reference, grid FROM parks "
+                        f"WHERE reference IN ({placeholders})", refs).fetchall()
+                    ref_to_grid = {r[0]: (r[1] or "")[:4] for r in park_rows if r[1]}
+                except Exception:
+                    ref_to_grid = {}
+
+                if time.monotonic() < self._tune_suppress_until and self._pota_clicked_hz:
+                    vfo_hz = self._pota_clicked_hz
+                else:
+                    vfo_hz = (self._flrig_freq_hz if self._flrig_freq_hz is not None
+                              else self._pota_clicked_hz)
+
+                for s in self._pota_spots_raw:
+                    ref  = s.get("reference", s.get("parkReference", ""))
+                    act  = s.get("activator",  s.get("activatorCallsign", ""))
+                    gs   = ref_to_grid.get(ref, "")
+                    if len(gs) < 4:
+                        continue
+                    spot_gs_map.setdefault(gs, [])
+                    if act and act not in spot_gs_map[gs]:
+                        spot_gs_map[gs].append(act)
+                    if vfo_hz is not None:
+                        try:
+                            spot_hz = int(float(s.get("frequency", s.get("freq", 0))) * 1000)
+                            if spot_hz == int(vfo_hz):
+                                tuned_gs.add(gs)
+                        except (ValueError, TypeError):
+                            pass
+
+        active_only_gs = {gs for gs in spot_gs_map if gs not in logged_gs and gs not in tuned_gs}
+        flash_gs = logged_gs & (set(spot_gs_map) - tuned_gs)
+
+        # ── Draw active-only (orange) ────────────────────────────────────
+        for gs in active_only_gs:
             lat, lon = grid_to_latlon(gs)
             if lat is None:
                 continue
-            x = (lon + 180) / 360 * W
-            y = (90 - lat) / 180 * H
-            cnt = row["cnt"]
+            x, y = mpx(lon, lat)
             canvas.create_rectangle(x-7, y-5, x+7, y+5,
                                     fill=MAP_GLOW, outline="", tags="marker")
-            canvas.create_rectangle(x-5, y-3, x+5, y+3,
-                                    fill=ACCENT, outline="", tags="marker")
+            inner = canvas.create_rectangle(x-5, y-3, x+5, y+3,
+                                            fill=ACCENT, outline="", tags="marker")
+            self._map_markers[(round(x), round(y))] = (
+                f"{', '.join(spot_gs_map[gs])}  [{gs}]  (spot)")
+            self._map_marker_items[gs] = [inner]
+
+        # ── Draw logged QSOs (green) ─────────────────────────────────────
+        total_qsos = 0
+        for row in qso_rows:
+            gs  = row["gs"]
+            cnt = row["cnt"]
+            total_qsos += cnt
+            if gs in flash_gs or gs in tuned_gs:
+                continue
+            lat, lon = grid_to_latlon(gs)
+            if lat is None:
+                continue
+            x, y = mpx(lon, lat)
+            canvas.create_rectangle(x-7, y-5, x+7, y+5,
+                                    fill=MAP_GLOW, outline="", tags="marker")
+            inner = canvas.create_rectangle(x-5, y-3, x+5, y+3,
+                                            fill=POTA_WORKED, outline="", tags="marker")
             if cnt > 1:
                 canvas.create_text(x, y, text=str(cnt),
                                    fill=BG, font=("Courier New", 7, "bold"),
                                    tags="marker")
             self._map_markers[(round(x), round(y))] = (
-                f"{row['calls']}  [{gs}]  ×{cnt}"
-            )
+                f"{row['calls']}  [{gs}]  ×{cnt}")
+            self._map_marker_items[gs] = [inner]
 
-        n = len(rows)
-        total_qsos = sum(r["cnt"] for r in rows)
+        # ── Draw flash grids (green initially; tick will alternate) ─────
+        for gs in flash_gs:
+            row = qso_info.get(gs, {})
+            cnt = row.get("cnt", 0)
+            lat, lon = grid_to_latlon(gs)
+            if lat is None:
+                continue
+            x, y = mpx(lon, lat)
+            canvas.create_rectangle(x-7, y-5, x+7, y+5,
+                                    fill=MAP_GLOW, outline="", tags="marker")
+            inner = canvas.create_rectangle(x-5, y-3, x+5, y+3,
+                                            fill=POTA_WORKED, outline="", tags="marker")
+            if cnt > 1:
+                canvas.create_text(x, y, text=str(cnt),
+                                   fill=BG, font=("Courier New", 7, "bold"),
+                                   tags="marker")
+            self._map_markers[(round(x), round(y))] = (
+                f"{row.get('calls', '')}  [{gs}]  ×{cnt}  +spot")
+            self._map_marker_items[gs] = [inner]
+
+        # ── Draw tuned (blue) ────────────────────────────────────────────
+        self._map_tuned_px = None
+        for gs in tuned_gs:
+            lat, lon = grid_to_latlon(gs)
+            if lat is None:
+                continue
+            x, y = mpx(lon, lat)
+            canvas.create_rectangle(x-7, y-5, x+7, y+5,
+                                    fill=MAP_GLOW, outline="", tags="marker")
+            canvas.create_rectangle(x-5, y-3, x+5, y+3,
+                                    fill=POTA_TUNED, outline="", tags="marker")
+            label_parts = []
+            if gs in spot_gs_map:
+                label_parts.append(", ".join(spot_gs_map[gs]))
+            if gs in qso_info:
+                label_parts.append(f"×{qso_info[gs]['cnt']} QSO")
+            self._map_markers[(round(x), round(y))] = (
+                f"{' | '.join(label_parts)}  [{gs}]  tuned")
+            if self._map_tuned_px is None:
+                self._map_tuned_px = (x, y)
+
+        # ── User's own grid (red diamond) ───────────────────────────────
+        self._map_my_px = None
+        my_gs = (self.cfg.get("gridsquare") or "")[:6].strip().upper()
+        if len(my_gs) >= 4:
+            lat, lon = grid_to_latlon(my_gs)
+            if lat is not None:
+                x, y = mpx(lon, lat)
+                s = 10
+                canvas.create_polygon(x, y-s, x+s, y, x, y+s, x-s, y,
+                                      fill="#ff3333", outline="#ff8888",
+                                      width=1, tags="mymarker")
+                self._map_my_px = (x, y)
+                self._map_markers[(round(x), round(y))] = (
+                    f"My grid: {my_gs}")
+
+        # ── Manage flash and beam loops ──────────────────────────────────
+        self._map_flash_grids = flash_gs
+        if flash_gs and not self._map_flash_id:
+            self._map_flash_tick()
+        if self._map_my_px and self._map_tuned_px:
+            self._start_map_beam()
+        else:
+            self._stop_map_beam()
+
+        n = len(logged_gs)
         self._map_count_lbl.config(
             text=f"{n} grid square{'s' if n != 1 else ''} ({total_qsos} QSO{'s' if total_qsos != 1 else ''})")
 
@@ -1080,6 +1247,131 @@ class POTAHunter(tk.Tk):
             self._map_tooltip.place(x=tx, y=ty)
         else:
             self._map_tooltip.place_forget()
+
+    # ── Map zoom / pan ────────────────────────────────────────────────────
+
+    def _map_zoom_in(self):
+        self._map_zoom = min(self._map_zoom * 1.5, 20.0)
+        self._full_map_redraw()
+
+    def _map_zoom_out(self):
+        self._map_zoom = max(self._map_zoom / 1.5, 1.0)
+        if self._map_zoom <= 1.0:
+            self._map_zoom = 1.0
+            self._map_pan_x = self._map_pan_y = 0.0
+        self._full_map_redraw()
+
+    def _map_zoom_reset(self):
+        self._map_zoom = 1.0
+        self._map_pan_x = self._map_pan_y = 0.0
+        self._full_map_redraw()
+
+    def _on_map_scroll(self, event):
+        factor = 1.25 if (getattr(event, "delta", 0) > 0 or getattr(event, "num", 0) == 4) else 0.8
+        new_zoom = max(1.0, min(20.0, self._map_zoom * factor))
+        if new_zoom == self._map_zoom:
+            return
+        mx, my = event.x, event.y
+        self._map_pan_x = mx - (mx - self._map_pan_x) * new_zoom / self._map_zoom
+        self._map_pan_y = my - (my - self._map_pan_y) * new_zoom / self._map_zoom
+        self._map_zoom = new_zoom
+        self._full_map_redraw()
+
+    def _on_map_drag_start(self, event):
+        self._map_drag_start = (event.x, event.y)
+
+    def _on_map_drag(self, event):
+        if self._map_drag_start is None:
+            return
+        dx = event.x - self._map_drag_start[0]
+        dy = event.y - self._map_drag_start[1]
+        self._map_pan_x += dx
+        self._map_pan_y += dy
+        self._map_drag_start = (event.x, event.y)
+        self._full_map_redraw()
+
+    def _on_map_drag_end(self, event):
+        self._map_drag_start = None
+
+    # ── Map animations ────────────────────────────────────────────────────
+
+    def _map_flash_tick(self):
+        if not self._map_flash_grids:
+            self._map_flash_id = None
+            return
+        self._map_flash_state = not self._map_flash_state
+        color = POTA_WORKED if self._map_flash_state else ACCENT
+        for gs in self._map_flash_grids:
+            for item_id in self._map_marker_items.get(gs, []):
+                try:
+                    self._map_canvas.itemconfig(item_id, fill=color)
+                except Exception:
+                    pass
+        self._map_flash_id = self.after(750, self._map_flash_tick)
+
+    def _map_scan_blink_tick(self):
+        if not self._pota_scan_active:
+            if hasattr(self, '_map_canvas'):
+                self._map_canvas.delete("scan_label")
+            self._map_scan_blink_id = None
+            return
+        self._map_scan_blink_st = not self._map_scan_blink_st
+        self._map_canvas.delete("scan_label")
+        if self._map_scan_blink_st:
+            W = self._map_canvas.winfo_width()
+            self._map_canvas.create_text(
+                W // 2, 18, text="◈ SCANNING ◈",
+                fill=POTA_TUNED, font=("Courier New", 11, "bold"),
+                tags="scan_label")
+        self._map_scan_blink_id = self.after(600, self._map_scan_blink_tick)
+
+    def _start_map_scan_blink(self):
+        if self._map_scan_blink_id:
+            return
+        self._map_scan_blink_tick()
+
+    def _map_beam_tick(self):
+        import math
+        canvas = self._map_canvas
+        canvas.delete("beam_line")
+        if not self._map_my_px or not self._map_tuned_px:
+            self._map_beam_id = None
+            return
+        x1, y1 = self._map_my_px
+        x2, y2 = self._map_tuned_px
+        dx = x2 - x1
+        dy = y2 - y1
+        length = math.hypot(dx, dy)
+        if length < 1:
+            self._map_beam_id = None
+            return
+        step = 12
+        dash_len = 6
+        phase_offset = (self._map_beam_phase * 2) % step
+        d = phase_offset
+        while d < length:
+            d2 = min(d + dash_len, length)
+            lx1 = x1 + dx / length * d
+            ly1 = y1 + dy / length * d
+            lx2 = x1 + dx / length * d2
+            ly2 = y1 + dy / length * d2
+            canvas.create_line(lx1, ly1, lx2, ly2,
+                               fill=POTA_TUNED, width=2, tags="beam_line")
+            d += step
+        self._map_beam_phase = (self._map_beam_phase + 1) % 6
+        self._map_beam_id = self.after(80, self._map_beam_tick)
+
+    def _start_map_beam(self):
+        if self._map_beam_id:
+            return
+        self._map_beam_tick()
+
+    def _stop_map_beam(self):
+        if self._map_beam_id:
+            self.after_cancel(self._map_beam_id)
+            self._map_beam_id = None
+        if hasattr(self, '_map_canvas'):
+            self._map_canvas.delete("beam_line")
 
     def _open_leaflet_map(self):
         rows = self._read_adif_grids()
@@ -1447,6 +1739,7 @@ class POTAHunter(tk.Tk):
         self._pota_scan_active = True
         self._pota_scan_idx    = 0
         self._pota_scan_btn.config(text="⏹ Stop Scan", fg=ACCENT)
+        self._start_map_scan_blink()
         self._pota_scan_step()
 
     def _stop_pota_scan(self):
@@ -1455,6 +1748,11 @@ class POTAHunter(tk.Tk):
         if self._pota_scan_after_id:
             self.after_cancel(self._pota_scan_after_id)
             self._pota_scan_after_id = None
+        if self._map_scan_blink_id:
+            self.after_cancel(self._map_scan_blink_id)
+            self._map_scan_blink_id = None
+        if hasattr(self, '_map_canvas'):
+            self._map_canvas.delete("scan_label")
 
     def _pota_scan_step(self):
         if not self._pota_scan_active:
