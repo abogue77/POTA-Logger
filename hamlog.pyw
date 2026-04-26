@@ -1528,7 +1528,7 @@ class POTAHunter(tk.Tk):
             canvas.create_rectangle(x-7, y-5, x+7, y+5,
                                     fill=MAP_GLOW, outline="", tags="marker")
             inner = canvas.create_rectangle(x-5, y-3, x+5, y+3,
-                                            fill=ACCENT, outline="", tags="marker")
+                                            fill=YELLOW, outline="", tags="marker")
             self._map_markers[(round(x), round(y))] = (
                 f"{', '.join(spot_gs_map[gs])}  [{gs}]  (spot)")
             self._map_marker_items[gs] = [inner]
@@ -1814,7 +1814,8 @@ class POTAHunter(tk.Tk):
             mtime = None
         if mtime != self._map_adif_mtime:
             self._map_adif_mtime = mtime
-        self._refresh_map()
+        if not self._pota_scan_active:
+            self._refresh_map()
         self._map_poll_id = self.after(5000, self._do_map_poll)
 
     def _stop_map_poll(self):
@@ -2176,6 +2177,7 @@ class POTAHunter(tk.Tk):
         self._pota_tree.selection_set(iid)
         self._pota_tree.see(iid)
         self._pota_scan_idx += 1
+        self._refresh_map()
         interval_ms = max(5, min(60, self._pota_scan_interval.get())) * 1_000
         self._pota_scan_after_id = self.after(interval_ms, self._pota_scan_step)
 
