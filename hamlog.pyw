@@ -1169,6 +1169,13 @@ class POTAHunter(tk.Tk):
         tk.Button(tb, text="⟳ Refresh", bg=BG3, fg=FG, font=SM,
                   relief="flat", cursor="hand2", padx=8,
                   command=self._manual_pota_refresh).pack(side="right", padx=6)
+        tk.Label(tb, text="s", bg=PBGK, fg=FG2, font=SM).pack(side="right")
+        tk.Spinbox(tb, from_=5, to=60, increment=5,
+                   textvariable=self._pota_scan_interval,
+                   width=4, bg=BG3, fg=FG, font=SM,
+                   relief="flat", justify="center",
+                   buttonbackground=BG3).pack(side="right")
+        tk.Label(tb, text="Interval:", bg=PBGK, fg=FG2, font=SM).pack(side="right", padx=(8, 2))
         self._pota_scan_btn = tk.Button(
             tb, text="▶ Scan", bg=BG3, fg=FG, font=SM,
             relief="flat", cursor="hand2", padx=8, width=12,
@@ -1180,13 +1187,6 @@ class POTAHunter(tk.Tk):
         ttk.Checkbutton(
             tb, text="Auto re-spot QSO", variable=self._pota_respot_enabled
         ).pack(side="right", padx=(0, 6))
-        tk.Label(tb, text="s", bg=PBGK, fg=FG2, font=SM).pack(side="right")
-        tk.Spinbox(tb, from_=5, to=60, increment=5,
-                   textvariable=self._pota_scan_interval,
-                   width=4, bg=BG3, fg=FG, font=SM,
-                   relief="flat", justify="center",
-                   buttonbackground=BG3).pack(side="right")
-        tk.Label(tb, text="Interval:", bg=PBGK, fg=FG2, font=SM).pack(side="right", padx=(8, 2))
 
         # Treeview
         frm = tk.Frame(parent, bg=PBGK)
