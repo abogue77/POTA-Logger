@@ -1091,9 +1091,10 @@ class POTAHunter(tk.Tk):
             if refs:
                 placeholders = ",".join("?" * len(refs))
                 try:
-                    park_rows = self.conn.execute(
-                        f"SELECT reference, grid FROM parks "
-                        f"WHERE reference IN ({placeholders})", refs).fetchall()
+                    with sqlite3.connect(PARKS_DB) as _pk:
+                        park_rows = _pk.execute(
+                            f"SELECT reference, grid FROM parks "
+                            f"WHERE reference IN ({placeholders})", refs).fetchall()
                     ref_to_grid = {r[0]: (r[1] or "")[:4] for r in park_rows if r[1]}
                 except Exception:
                     ref_to_grid = {}
