@@ -642,8 +642,8 @@ class POTAHunter(tk.Tk):
         self._pota_loaded    = False
         self._pota_after_id  = None
         self._pota_spots_raw = []
-        self._freq_check_var = tk.StringVar()
-        self._freq_check_lbl = None
+        self._freq_check_var    = tk.StringVar()
+        self._freq_check_border = None
         self._pota_band_var  = tk.StringVar(value="All")
         self._pota_mode_var  = tk.StringVar(value="All")
         self._pota_hide_qrt  = tk.BooleanVar(value=False)
@@ -1520,12 +1520,14 @@ class POTAHunter(tk.Tk):
                   command=self._clear_form, **bc).pack(side="left", padx=8)
 
         tk.Label(btn_row, text="Freq kHz:", bg=BG, fg=FG2, font=LBL).pack(side="left", padx=(12, 2))
-        freq_entry = tk.Entry(btn_row, textvariable=self._freq_check_var, width=7,
-                              bg=BG2, fg=FG, insertbackground=FG, font=LBL, relief="flat")
-        freq_entry.pack(side="left")
-        self._freq_check_lbl = tk.Label(btn_row, text="  ●  ", bg=BG, fg=MUTED, font=LBL)
-        self._freq_check_lbl.pack(side="left", padx=(4, 0))
-        self._freq_check_var.trace_add("write", lambda *_: self._check_freq_conflict())
+        self._freq_check_border = tk.Frame(btn_row, bg=MUTED, padx=2, pady=2)
+        self._freq_check_border.pack(side="left")
+        freq_entry = tk.Entry(self._freq_check_border, textvariable=self._freq_check_var, width=7,
+                              bg=BG2, fg=FG, insertbackground=FG, font=LBL,
+                              bd=0, highlightthickness=0)
+        freq_entry.pack()
+        freq_entry.bind("<Return>", lambda _: self._check_freq_conflict())
+        freq_entry.bind("<KeyRelease>", lambda e: self._reset_freq_border() if e.keysym != "Return" else None)
 
         self.e_call.focus_set()
 
@@ -1594,23 +1596,27 @@ class POTAHunter(tk.Tk):
         self._park_info_lbl.config(text="", fg=MUTED)
         self.e_call.focus_set()
 
+    def _reset_freq_border(self):
+        if self._freq_check_border is not None:
+            self._freq_check_border.config(bg=MUTED)
+
     def _check_freq_conflict(self):
-        if self._freq_check_lbl is None:
+        if self._freq_check_border is None:
             return
         raw = self._freq_check_var.get().strip()
         if not raw:
-            self._freq_check_lbl.config(fg=MUTED)
+            self._freq_check_border.config(bg=MUTED)
             return
         try:
             entered_khz = float(raw)
         except ValueError:
-            self._freq_check_lbl.config(fg=MUTED)
+            self._freq_check_border.config(bg=MUTED)
             return
         valid = [float(s.get("frequency", s.get("freq", 0)))
                  for s in self._pota_spots_raw
                  if s.get("frequency", s.get("freq")) not in (None, "", 0)]
         if not valid:
-            self._freq_check_lbl.config(fg=MUTED)
+            self._freq_check_border.config(bg=MUTED)
             return
         min_dist = min(abs(entered_khz - f) for f in valid)
         if min_dist < 1:
@@ -1621,7 +1627,7 @@ class POTAHunter(tk.Tk):
             color = YELLOW  # yellow — 2.0–2.9 kHz
         else:
             color = ACC3    # green  — 3.0+ kHz
-        self._freq_check_lbl.config(fg=color)
+        self._freq_check_border.config(bg=color)
 
     # ── Log QSO ───────────────────────────────────────────────────────────
     def _log_qso(self, _=None):
