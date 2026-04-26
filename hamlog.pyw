@@ -1520,12 +1520,12 @@ class POTAHunter(tk.Tk):
                   command=self._clear_form, **bc).pack(side="left", padx=8)
 
         tk.Label(btn_row, text="Freq kHz:", bg=BG, fg=FG2, font=LBL).pack(side="left", padx=(12, 2))
-        self._freq_check_border = tk.Frame(btn_row, bg=MUTED, padx=2, pady=2)
+        self._freq_check_border = tk.Frame(btn_row, bg=MUTED)
         self._freq_check_border.pack(side="left")
         freq_entry = tk.Entry(self._freq_check_border, textvariable=self._freq_check_var, width=7,
                               bg=BG2, fg=FG, insertbackground=FG, font=LBL,
                               bd=0, highlightthickness=0)
-        freq_entry.pack()
+        freq_entry.pack(padx=3, pady=3)
         freq_entry.bind("<Return>", lambda _: self._check_freq_conflict())
         freq_entry.bind("<KeyRelease>", lambda e: self._reset_freq_border() if e.keysym != "Return" else None)
 
