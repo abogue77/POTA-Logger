@@ -1519,7 +1519,7 @@ class POTAHunter(tk.Tk):
         tk.Button(btn_row, text="✕ Clear Form", bg=BG3, fg=FG2,
                   command=self._clear_form, **bc).pack(side="left", padx=8)
 
-        tk.Label(btn_row, text="Freq kHz:", bg=BG, fg=FG2, font=LBL).pack(side="left", padx=(12, 2))
+        tk.Label(btn_row, text="Check for clear freq kHz:", bg=BG, fg=FG2, font=LBL).pack(side="left", padx=(12, 2))
         self._freq_check_border = tk.Frame(btn_row, bg=MUTED)
         self._freq_check_border.pack(side="left")
         freq_entry = tk.Entry(self._freq_check_border, textvariable=self._freq_check_var, width=7,
