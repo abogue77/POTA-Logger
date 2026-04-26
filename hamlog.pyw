@@ -404,7 +404,7 @@ def pota_post_spot(activator, spotter, reference, freq_khz, mode, comment=""):
         "reference":  reference,
         "frequency":  str(freq_khz),
         "mode":       mode,
-        "comments":   comment or "Spotted via HamLog",
+        "comments":   comment or "Spotted via POTA Hunter",
     }).encode()
     req = urllib.request.Request(
         "https://api.pota.app/spot",
