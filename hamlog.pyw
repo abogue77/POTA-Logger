@@ -395,6 +395,34 @@ def flrig_set_freq(host, port, freq_hz):
     except Exception as e:
         return str(e)
 
+# ── POTA spot posting ─────────────────────────────────────────────────────────
+def pota_post_spot(activator, spotter, reference, freq_khz, mode, comment=""):
+    import json as _json
+    body = _json.dumps({
+        "activator":  activator,
+        "spotter":    spotter,
+        "reference":  reference,
+        "frequency":  str(freq_khz),
+        "mode":       mode,
+        "comments":   comment or "Spotted via HamLog",
+    }).encode()
+    req = urllib.request.Request(
+        "https://api.pota.app/spot",
+        data=body,
+        method="POST",
+        headers={
+            "Content-Type": "application/json",
+            "User-Agent":   "HamLog/2.0",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return True, None
+    except urllib.error.HTTPError as e:
+        return False, f"HTTP {e.code}"
+    except Exception as e:
+        return False, str(e)
+
 # ── QRZ ───────────────────────────────────────────────────────────────────────
 _qrz_session = None
 
@@ -653,6 +681,8 @@ class POTAHunter(tk.Tk):
         self._pota_scan_after_id     = None
         self._pota_scan_interval     = tk.IntVar(value=15)
         self._pota_scan_skip_worked  = tk.BooleanVar(value=False)
+        self._pota_spot_ctx          = None
+        self._pota_respot_enabled    = tk.BooleanVar(value=False)
         self._map_markers   = {}
         self._map_drawn     = False
         self._map_resize_id = None
@@ -1147,6 +1177,9 @@ class POTAHunter(tk.Tk):
         ttk.Checkbutton(
             tb, text="Skip worked", variable=self._pota_scan_skip_worked
         ).pack(side="right", padx=(0, 6))
+        ttk.Checkbutton(
+            tb, text="Auto re-spot QSO", variable=self._pota_respot_enabled
+        ).pack(side="right", padx=(0, 6))
         tk.Label(tb, text="s", bg=PBGK, fg=FG2, font=SM).pack(side="right")
         tk.Spinbox(tb, from_=5, to=60, increment=5,
                    textvariable=self._pota_scan_interval,
@@ -1268,6 +1301,12 @@ class POTAHunter(tk.Tk):
         park      = values[1]
         park_name = values[2]  # Park name from POTA API
         freq_str  = values[3]
+        self._pota_spot_ctx = {
+            "activator": activator,
+            "reference": park,
+            "freq_khz":  freq_str,
+            "mode":      values[4],
+        }
 
         # Populate QSO entry fields
         self.e_call.delete(0, "end")
@@ -1594,6 +1633,7 @@ class POTAHunter(tk.Tk):
         self.e_rst_r.delete(0,"end"); self.e_rst_r.insert(0,"59")
         self._qrz_info_lbl.config(text="")
         self._park_info_lbl.config(text="", fg=MUTED)
+        self._pota_spot_ctx = None
         self.e_call.focus_set()
 
     def _reset_freq_border(self):
@@ -1691,7 +1731,34 @@ class POTAHunter(tk.Tk):
         self._set_status(f"Logged ✔  {call}  {date_str} {time_str}z  {freq_disp}  {band}  {mode}")
         self._reload_table()
         self._refresh_pota_highlights()
+        self._maybe_post_pota_spot(row)
         self._clear_form()
+
+    def _maybe_post_pota_spot(self, row):
+        if not self._pota_respot_enabled.get():
+            return
+        ctx = self._pota_spot_ctx
+        if not ctx:
+            return
+        mycall = self.cfg.get("callsign", "").upper()
+        if not mycall:
+            return
+        freq_khz = ctx.get("freq_khz") or (
+            str(round(row["freq"] * 1000)) if row.get("freq") else ""
+        )
+        mode = ctx.get("mode") or row.get("mode", "")
+        def bg():
+            ok, err = pota_post_spot(
+                activator=ctx["activator"],
+                spotter=mycall,
+                reference=ctx["reference"],
+                freq_khz=freq_khz,
+                mode=mode,
+            )
+            msg = "POTA spot posted ✔" if ok else f"POTA spot failed: {err}"
+            fg  = ACC3 if ok else WARN
+            self.after(0, lambda: self._set_status(msg, fg))
+        threading.Thread(target=bg, daemon=True).start()
 
     # ── Table ─────────────────────────────────────────────────────────────
     def _reload_table(self, rows=None):
