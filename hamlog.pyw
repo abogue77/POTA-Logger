@@ -26,6 +26,8 @@ import re
 import json
 import tempfile
 import webbrowser
+import http.server
+import socketserver
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 LOGBOOK_DIR = os.path.join(os.path.expanduser("~"), "HamLog")
@@ -1082,6 +1084,8 @@ class POTAHunter(tk.Tk):
         self._pota_scan_skip_worked  = tk.BooleanVar(value=False)
         self._pota_spot_ctx          = None
         self._pota_respot_enabled    = tk.BooleanVar(value=False)
+        self._map_server             = None
+        self._map_server_port        = None
         self._map_markers       = {}
         self._map_drawn         = False
         self._map_resize_id     = None
@@ -1769,39 +1773,160 @@ class POTAHunter(tk.Tk):
             self._map_canvas.delete("beam_line")
 
     def _open_leaflet_map(self):
-        rows = self._read_adif_grids()
+        if self._map_server is None:
+            self._start_map_server()
+        if self._map_server_port:
+            webbrowser.open(f"http://localhost:{self._map_server_port}")
 
-        markers_js = []
-        for row in rows:
-            gs = row["gs"]
-            lat, lon = grid_to_latlon(gs)
-            if lat is None:
-                continue
-            popup = json.dumps(f"{row['calls']}  [{gs}]  ×{row['cnt']}")
-            markers_js.append(
-                f'L.circleMarker([{lat},{lon}],{{radius:7,color:"#e8a020",'
-                f'fillColor:"#e8a020",fillOpacity:0.85}}).bindPopup({popup}).addTo(map);'
-            )
-
-        html = (
-            '<!DOCTYPE html>\n'
-            '<html><head><meta charset="utf-8"><title>POTA Hunter Grid Map</title>\n'
-            '<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>\n'
-            '<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>\n'
-            '<style>html,body,#map{height:100%;margin:0;background:#111318;}</style>\n'
-            '</head><body><div id="map"></div><script>\n'
+    def _start_map_server(self):
+        app = self
+        MAP_HTML = (
+            '<!DOCTYPE html><html><head><meta charset="utf-8">'
+            '<title>POTA Hunter — Live Map</title>'
+            '<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>'
+            '<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>'
+            '<style>html,body,#map{height:100%;margin:0;background:#111318;}'
+            '#status{position:absolute;top:8px;right:8px;z-index:9999;'
+            'background:rgba(0,0,0,.6);color:#aaa;font:11px monospace;padding:4px 8px;'
+            'border-radius:4px;pointer-events:none;}</style>'
+            '</head><body><div id="map"></div><div id="status">Loading…</div><script>\n'
             'var map=L.map("map",{center:[20,0],zoom:2});\n'
-            'L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",{\n'
-            '  attribution:"&copy; OpenStreetMap contributors &copy; CARTO",\n'
-            '  subdomains:"abcd",maxZoom:19}).addTo(map);\n'
-            + "\n".join(markers_js) + "\n"
+            'L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",'
+            '{attribution:"&copy; OpenStreetMap contributors &copy; CARTO",'
+            'subdomains:"abcd",maxZoom:19}).addTo(map);\n'
+            'var markers=[],beamLine=null;\n'
+            'function clearMarkers(){'
+            '  markers.forEach(function(m){map.removeLayer(m);});markers=[];\n'
+            '  if(beamLine){map.removeLayer(beamLine);beamLine=null;}}\n'
+            'function refreshData(){\n'
+            '  fetch("/data").then(function(r){return r.json();}).then(function(d){\n'
+            '    clearMarkers();\n'
+            '    (d.spots||[]).forEach(function(s){\n'
+            '      var color=s.tuned?"#0077ff":s.worked?"#00bb44":"#ffff00";\n'
+            '      var r=s.tuned?9:7;\n'
+            '      var m=L.circleMarker([s.lat,s.lon],'
+            '{radius:r,color:color,fillColor:color,fillOpacity:0.85,weight:s.tuned?2:1});\n'
+            '      var pop=s.activator+" ["+s.park+"]<br>"+s.freq_khz+" kHz "+s.mode;\n'
+            '      if(s.tuned)pop+="<br><b>&#x25CF; TUNED</b>";\n'
+            '      if(s.worked)pop+="<br><b>Worked</b>";\n'
+            '      m.bindPopup(pop);m.addTo(map);markers.push(m);});\n'
+            '    if(d.my_grid){\n'
+            '      var mg=d.my_grid;\n'
+            '      var star=L.marker([mg.lat,mg.lon],'
+            '{icon:L.divIcon({html:\'<span style="color:#ff2222;font-size:18px;">&#9733;</span>\','
+            'className:"",iconAnchor:[9,9]})});\n'
+            '      star.bindPopup("My grid: "+mg.gs);star.addTo(map);markers.push(star);}\n'
+            '    if(d.my_grid&&d.tuned_spot){\n'
+            '      beamLine=L.polyline([[d.my_grid.lat,d.my_grid.lon],'
+            '[d.tuned_spot.lat,d.tuned_spot.lon]],'
+            '{color:"#0077ff",weight:2,dashArray:"8 6",opacity:0.75});\n'
+            '      beamLine.addTo(map);}\n'
+            '    var now=new Date().toLocaleTimeString();\n'
+            '    document.getElementById("status").textContent='
+            '"Updated "+now+" — "+( d.spots||[]).length+" spots";'
+            '  }).catch(function(e){'
+            '    document.getElementById("status").textContent="Fetch error: "+e;});}\n'
+            'refreshData();\n'
+            'setInterval(refreshData,10000);\n'
             '</script></body></html>'
         )
 
-        tmp = os.path.join(tempfile.gettempdir(), "hamlog_map.html")
-        with open(tmp, "w", encoding="utf-8") as f:
-            f.write(html)
-        webbrowser.open(tmp)
+        class _Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                if self.path == '/data':
+                    try:
+                        rows = app._read_adif_grids()
+                        worked_calls = set()
+                        try:
+                            worked_calls = {r[0] for r in app.conn.execute(
+                                "SELECT DISTINCT UPPER(TRIM(call)) FROM qso").fetchall() if r[0]}
+                        except Exception:
+                            pass
+                        if (time.monotonic() < app._tune_suppress_until
+                                and app._pota_clicked_hz):
+                            vfo_hz = app._pota_clicked_hz
+                        else:
+                            vfo_hz = (app._flrig_freq_hz if app._flrig_freq_hz is not None
+                                      else app._pota_clicked_hz)
+                        spots_out = []
+                        seen_gs = {}
+                        for s in (app._pota_spots_filtered or []):
+                            gs = (s.get("grid") or s.get("locationDesc") or "")[:6].strip().upper()
+                            if len(gs) < 4:
+                                continue
+                            lat, lon = grid_to_latlon(gs)
+                            if lat is None:
+                                continue
+                            activator = str(s.get("activator", "")).strip().upper()
+                            park = str(s.get("reference", s.get("parkReference", ""))).strip()
+                            try:
+                                freq_khz = float(s.get("frequency", 0))
+                                spot_hz = int(freq_khz * 1000)
+                            except (ValueError, TypeError):
+                                freq_khz = 0
+                                spot_hz = 0
+                            tuned = bool(vfo_hz is not None and spot_hz and spot_hz == int(vfo_hz))
+                            worked = activator in worked_calls
+                            mode = str(s.get("mode", "")).strip()
+                            spots_out.append({
+                                "gs": gs, "activator": activator, "park": park,
+                                "freq_khz": freq_khz, "mode": mode,
+                                "tuned": tuned, "worked": worked,
+                                "lat": lat, "lon": lon,
+                            })
+                        my_grid_data = None
+                        tuned_spot = None
+                        my_gs = (app.cfg.get("gridsquare") or "")[:6].strip().upper()
+                        if len(my_gs) >= 4:
+                            mlat, mlon = grid_to_latlon(my_gs)
+                            if mlat is not None:
+                                my_grid_data = {"gs": my_gs, "lat": mlat, "lon": mlon}
+                        for sp in spots_out:
+                            if sp["tuned"]:
+                                tuned_spot = {"lat": sp["lat"], "lon": sp["lon"]}
+                                break
+                        payload = json.dumps({
+                            "spots": spots_out,
+                            "my_grid": my_grid_data,
+                            "tuned_spot": tuned_spot,
+                        }).encode()
+                        self.send_response(200)
+                        self.send_header("Content-Type", "application/json")
+                        self.send_header("Content-Length", str(len(payload)))
+                        self.send_header("Access-Control-Allow-Origin", "*")
+                        self.end_headers()
+                        self.wfile.write(payload)
+                    except Exception as exc:
+                        err = json.dumps({"error": str(exc)}).encode()
+                        self.send_response(500)
+                        self.send_header("Content-Type", "application/json")
+                        self.send_header("Content-Length", str(len(err)))
+                        self.end_headers()
+                        self.wfile.write(err)
+                else:
+                    body = MAP_HTML.encode()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/html; charset=utf-8")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+
+            def log_message(self, fmt, *args):
+                pass  # suppress access log noise
+
+        class _ReuseServer(socketserver.ThreadingTCPServer):
+            allow_reuse_address = True
+
+        for port in (8765, 8766, 8767):
+            try:
+                server = _ReuseServer(("localhost", port), _Handler)
+                self._map_server = server
+                self._map_server_port = port
+                t = threading.Thread(target=server.serve_forever, daemon=True)
+                t.start()
+                break
+            except OSError:
+                continue
 
     def _start_map_poll(self):
         self._stop_map_poll()
@@ -2098,6 +2223,7 @@ class POTAHunter(tk.Tk):
                 except (ValueError, TypeError):
                     pass
             self._pota_tree.item(iid, tags=(base,))
+        self._refresh_map()
 
     def _auto_refresh_pota(self):
         if self._pota_paused:
@@ -2854,6 +2980,8 @@ class POTAHunter(tk.Tk):
             self.after_cancel(self._pota_scan_after_id)
         if self._map_resize_id:
             self.after_cancel(self._map_resize_id)
+        if self._map_server:
+            threading.Thread(target=self._map_server.shutdown, daemon=True).start()
         if self.conn:
             self.conn.close()
         save_config(self.cfg)
