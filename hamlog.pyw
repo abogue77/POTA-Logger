@@ -65,7 +65,7 @@ def save_config(cfg):
 
 # ── SQLite in-memory index ────────────────────────────────────────────────────
 def make_index():
-    conn = sqlite3.connect(":memory:")
+    conn = sqlite3.connect(":memory:", check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("""
         CREATE TABLE qso (
@@ -1791,7 +1791,9 @@ class POTAHunter(tk.Tk):
             '<style>html,body,#map{height:100%;margin:0;background:#111318;}'
             '#status{position:absolute;top:8px;right:8px;z-index:9999;'
             'background:rgba(0,0,0,.6);color:#aaa;font:11px monospace;padding:4px 8px;'
-            'border-radius:4px;pointer-events:none;}</style>'
+            'border-radius:4px;pointer-events:none;}'
+            '.beam-anim{animation:beam-flow 0.9s linear infinite;}'
+            '@keyframes beam-flow{to{stroke-dashoffset:-20;}}</style>'
             '</head><body><div id="map"></div><div id="status">Loading…</div><script>\n'
             'var map=L.map("map",{center:[20,0],zoom:2});\n'
             'L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",'
@@ -1820,15 +1822,33 @@ class POTAHunter(tk.Tk):
             'className:"",iconAnchor:[9,9]})});\n'
             '      star.bindPopup("My grid: "+mg.gs);star.addTo(map);markers.push(star);}\n'
             '    if(d.my_grid&&d.tuned_spot){\n'
-            '      beamLine=L.polyline([[d.my_grid.lat,d.my_grid.lon],'
-            '[d.tuned_spot.lat,d.tuned_spot.lon]],'
-            '{color:"#0077ff",weight:2,dashArray:"8 6",opacity:0.75});\n'
+            '      var gcp=gcPoints(d.my_grid.lat,d.my_grid.lon,'
+            'd.tuned_spot.lat,d.tuned_spot.lon,60);\n'
+            '      beamLine=L.polyline(gcp,'
+            '{color:"#0077ff",weight:2.5,dashArray:"12 8",opacity:0.85,'
+            'className:"beam-anim"});\n'
             '      beamLine.addTo(map);}\n'
             '    var now=new Date().toLocaleTimeString();\n'
             '    document.getElementById("status").textContent='
             '"Updated "+now+" — "+( d.spots||[]).length+" spots";'
             '  }).catch(function(e){'
             '    document.getElementById("status").textContent="Fetch error: "+e;});}\n'
+            'function gcPoints(la1,lo1,la2,lo2,n){\n'
+            '  var R=Math.PI/180;\n'
+            '  var f1=la1*R,l1=lo1*R,f2=la2*R,l2=lo2*R;\n'
+            '  var d=2*Math.asin(Math.sqrt(Math.pow(Math.sin((f2-f1)/2),2)'
+            '+Math.cos(f1)*Math.cos(f2)*Math.pow(Math.sin((l2-l1)/2),2)));\n'
+            '  if(d<1e-6)return[[la1,lo1],[la2,lo2]];\n'
+            '  var pts=[];\n'
+            '  for(var i=0;i<=n;i++){\n'
+            '    var f=i/n,A=Math.sin((1-f)*d)/Math.sin(d),B=Math.sin(f*d)/Math.sin(d);\n'
+            '    var x=A*Math.cos(f1)*Math.cos(l1)+B*Math.cos(f2)*Math.cos(l2);\n'
+            '    var y=A*Math.cos(f1)*Math.sin(l1)+B*Math.cos(f2)*Math.sin(l2);\n'
+            '    var z=A*Math.sin(f1)+B*Math.sin(f2);\n'
+            '    pts.push([Math.atan2(z,Math.sqrt(x*x+y*y))/R,Math.atan2(y,x)/R]);\n'
+            '  }\n'
+            '  return pts;\n'
+            '}\n'
             'refreshData();\n'
             'setInterval(refreshData,2000);\n'
             '</script></body></html>'
