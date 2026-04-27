@@ -1830,7 +1830,7 @@ class POTAHunter(tk.Tk):
             '  }).catch(function(e){'
             '    document.getElementById("status").textContent="Fetch error: "+e;});}\n'
             'refreshData();\n'
-            'setInterval(refreshData,10000);\n'
+            'setInterval(refreshData,2000);\n'
             '</script></body></html>'
         )
 
