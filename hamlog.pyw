@@ -1848,24 +1848,44 @@ class POTAHunter(tk.Tk):
                         else:
                             vfo_hz = (app._flrig_freq_hz if app._flrig_freq_hz is not None
                                       else app._pota_clicked_hz)
+                        # Build park-reference → grid map from the parks DB
+                        # (same approach as _draw_map_markers)
+                        filtered = app._pota_spots_filtered or []
+                        refs = list({s.get("reference", s.get("parkReference", ""))
+                                     for s in filtered})
+                        ref_to_grid = {}
+                        if refs:
+                            try:
+                                placeholders = ",".join("?" * len(refs))
+                                with sqlite3.connect(PARKS_DB) as _pk:
+                                    park_rows = _pk.execute(
+                                        f"SELECT reference, grid FROM parks "
+                                        f"WHERE reference IN ({placeholders})",
+                                        refs).fetchall()
+                                ref_to_grid = {r[0]: (r[1] or "")[:4]
+                                               for r in park_rows if r[1]}
+                            except Exception:
+                                pass
                         spots_out = []
-                        seen_gs = {}
-                        for s in (app._pota_spots_filtered or []):
-                            gs = (s.get("grid") or s.get("locationDesc") or "")[:6].strip().upper()
+                        for s in filtered:
+                            park = str(s.get("reference", s.get("parkReference", ""))).strip()
+                            gs = ref_to_grid.get(park, "")
                             if len(gs) < 4:
                                 continue
                             lat, lon = grid_to_latlon(gs)
                             if lat is None:
                                 continue
-                            activator = str(s.get("activator", "")).strip().upper()
-                            park = str(s.get("reference", s.get("parkReference", ""))).strip()
+                            activator = str(s.get("activator",
+                                                   s.get("activatorCallsign", ""))).strip().upper()
                             try:
-                                freq_khz = float(s.get("frequency", 0))
+                                freq_khz = float(s.get("frequency",
+                                                        s.get("freq", 0)))
                                 spot_hz = int(freq_khz * 1000)
                             except (ValueError, TypeError):
                                 freq_khz = 0
                                 spot_hz = 0
-                            tuned = bool(vfo_hz is not None and spot_hz and spot_hz == int(vfo_hz))
+                            tuned = bool(vfo_hz is not None and spot_hz
+                                         and spot_hz == int(vfo_hz))
                             worked = activator in worked_calls
                             mode = str(s.get("mode", "")).strip()
                             spots_out.append({
