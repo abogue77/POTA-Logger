@@ -1773,6 +1773,9 @@ class POTAHunter(tk.Tk):
             self._map_canvas.delete("beam_line")
 
     def _open_leaflet_map(self):
+        if not self._pota_loaded:
+            self._pota_loaded = True
+            threading.Thread(target=self._fetch_pota_spots, daemon=True).start()
         if self._map_server is None:
             self._start_map_server()
         if self._map_server_port:
@@ -1832,97 +1835,20 @@ class POTAHunter(tk.Tk):
         )
 
         class _Handler(http.server.BaseHTTPRequestHandler):
+            def _send_json(self, obj, status=200):
+                body = json.dumps(obj).encode()
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(body)
+
             def do_GET(self):
                 if self.path == '/data':
-                    try:
-                        rows = app._read_adif_grids()
-                        worked_calls = set()
-                        try:
-                            worked_calls = {r[0] for r in app.conn.execute(
-                                "SELECT DISTINCT UPPER(TRIM(call)) FROM qso").fetchall() if r[0]}
-                        except Exception:
-                            pass
-                        if (time.monotonic() < app._tune_suppress_until
-                                and app._pota_clicked_hz):
-                            vfo_hz = app._pota_clicked_hz
-                        else:
-                            vfo_hz = (app._flrig_freq_hz if app._flrig_freq_hz is not None
-                                      else app._pota_clicked_hz)
-                        # Build park-reference → grid map from the parks DB
-                        # (same approach as _draw_map_markers)
-                        filtered = app._pota_spots_filtered or []
-                        refs = list({s.get("reference", s.get("parkReference", ""))
-                                     for s in filtered})
-                        ref_to_grid = {}
-                        if refs:
-                            try:
-                                placeholders = ",".join("?" * len(refs))
-                                with sqlite3.connect(PARKS_DB) as _pk:
-                                    park_rows = _pk.execute(
-                                        f"SELECT reference, grid FROM parks "
-                                        f"WHERE reference IN ({placeholders})",
-                                        refs).fetchall()
-                                ref_to_grid = {r[0]: (r[1] or "")[:4]
-                                               for r in park_rows if r[1]}
-                            except Exception:
-                                pass
-                        spots_out = []
-                        for s in filtered:
-                            park = str(s.get("reference", s.get("parkReference", ""))).strip()
-                            gs = ref_to_grid.get(park, "")
-                            if len(gs) < 4:
-                                continue
-                            lat, lon = grid_to_latlon(gs)
-                            if lat is None:
-                                continue
-                            activator = str(s.get("activator",
-                                                   s.get("activatorCallsign", ""))).strip().upper()
-                            try:
-                                freq_khz = float(s.get("frequency",
-                                                        s.get("freq", 0)))
-                                spot_hz = int(freq_khz * 1000)
-                            except (ValueError, TypeError):
-                                freq_khz = 0
-                                spot_hz = 0
-                            tuned = bool(vfo_hz is not None and spot_hz
-                                         and spot_hz == int(vfo_hz))
-                            worked = activator in worked_calls
-                            mode = str(s.get("mode", "")).strip()
-                            spots_out.append({
-                                "gs": gs, "activator": activator, "park": park,
-                                "freq_khz": freq_khz, "mode": mode,
-                                "tuned": tuned, "worked": worked,
-                                "lat": lat, "lon": lon,
-                            })
-                        my_grid_data = None
-                        tuned_spot = None
-                        my_gs = (app.cfg.get("gridsquare") or "")[:6].strip().upper()
-                        if len(my_gs) >= 4:
-                            mlat, mlon = grid_to_latlon(my_gs)
-                            if mlat is not None:
-                                my_grid_data = {"gs": my_gs, "lat": mlat, "lon": mlon}
-                        for sp in spots_out:
-                            if sp["tuned"]:
-                                tuned_spot = {"lat": sp["lat"], "lon": sp["lon"]}
-                                break
-                        payload = json.dumps({
-                            "spots": spots_out,
-                            "my_grid": my_grid_data,
-                            "tuned_spot": tuned_spot,
-                        }).encode()
-                        self.send_response(200)
-                        self.send_header("Content-Type", "application/json")
-                        self.send_header("Content-Length", str(len(payload)))
-                        self.send_header("Access-Control-Allow-Origin", "*")
-                        self.end_headers()
-                        self.wfile.write(payload)
-                    except Exception as exc:
-                        err = json.dumps({"error": str(exc)}).encode()
-                        self.send_response(500)
-                        self.send_header("Content-Type", "application/json")
-                        self.send_header("Content-Length", str(len(err)))
-                        self.end_headers()
-                        self.wfile.write(err)
+                    self._handle_data()
+                elif self.path == '/debug':
+                    self._handle_debug()
                 else:
                     body = MAP_HTML.encode()
                     self.send_response(200)
@@ -1930,6 +1856,123 @@ class POTAHunter(tk.Tk):
                     self.send_header("Content-Length", str(len(body)))
                     self.end_headers()
                     self.wfile.write(body)
+
+            def _handle_debug(self):
+                filtered = app._pota_spots_filtered or []
+                refs = list({s.get("reference", s.get("parkReference", ""))
+                             for s in filtered})
+                db_exists = os.path.exists(PARKS_DB)
+                db_count = 0
+                db_grid_count = 0
+                db_error = None
+                ref_to_grid = {}
+                if db_exists and refs:
+                    try:
+                        placeholders = ",".join("?" * len(refs))
+                        with sqlite3.connect(PARKS_DB) as _pk:
+                            db_count = _pk.execute(
+                                "SELECT COUNT(*) FROM parks").fetchone()[0]
+                            db_grid_count = _pk.execute(
+                                "SELECT COUNT(*) FROM parks WHERE grid != ''").fetchone()[0]
+                            park_rows = _pk.execute(
+                                f"SELECT reference, grid FROM parks "
+                                f"WHERE reference IN ({placeholders})",
+                                refs).fetchall()
+                        ref_to_grid = {r[0]: r[1] for r in park_rows if r[1]}
+                    except Exception as e:
+                        db_error = str(e)
+                sample = filtered[:3] if filtered else []
+                self._send_json({
+                    "spots_raw_count": len(app._pota_spots_raw),
+                    "spots_filtered_count": len(filtered),
+                    "sample_spot_keys": list(sample[0].keys()) if sample else [],
+                    "sample_refs": refs[:5],
+                    "parks_db_exists": db_exists,
+                    "parks_db_total": db_count,
+                    "parks_db_with_grid": db_grid_count,
+                    "refs_matched_in_db": len(ref_to_grid),
+                    "sample_matches": dict(list(ref_to_grid.items())[:5]),
+                    "db_error": db_error,
+                    "my_grid": app.cfg.get("gridsquare"),
+                })
+
+            def _handle_data(self):
+                try:
+                    worked_calls = set()
+                    try:
+                        worked_calls = {r[0] for r in app.conn.execute(
+                            "SELECT DISTINCT UPPER(TRIM(call)) FROM qso").fetchall() if r[0]}
+                    except Exception:
+                        pass
+                    if (time.monotonic() < app._tune_suppress_until
+                            and app._pota_clicked_hz):
+                        vfo_hz = app._pota_clicked_hz
+                    else:
+                        vfo_hz = (app._flrig_freq_hz if app._flrig_freq_hz is not None
+                                  else app._pota_clicked_hz)
+                    # Build park-reference → grid map from the parks DB
+                    # (same approach as _draw_map_markers)
+                    filtered = app._pota_spots_filtered or []
+                    refs = list({s.get("reference", s.get("parkReference", ""))
+                                 for s in filtered})
+                    ref_to_grid = {}
+                    if refs:
+                        try:
+                            placeholders = ",".join("?" * len(refs))
+                            with sqlite3.connect(PARKS_DB) as _pk:
+                                park_rows = _pk.execute(
+                                    f"SELECT reference, grid FROM parks "
+                                    f"WHERE reference IN ({placeholders})",
+                                    refs).fetchall()
+                            ref_to_grid = {r[0]: (r[1] or "")[:4]
+                                           for r in park_rows if r[1]}
+                        except Exception:
+                            pass
+                    spots_out = []
+                    for s in filtered:
+                        park = str(s.get("reference", s.get("parkReference", ""))).strip()
+                        gs = ref_to_grid.get(park, "")
+                        if len(gs) < 4:
+                            continue
+                        lat, lon = grid_to_latlon(gs)
+                        if lat is None:
+                            continue
+                        activator = str(s.get("activator",
+                                               s.get("activatorCallsign", ""))).strip().upper()
+                        try:
+                            freq_khz = float(s.get("frequency", s.get("freq", 0)))
+                            spot_hz = int(freq_khz * 1000)
+                        except (ValueError, TypeError):
+                            freq_khz = 0
+                            spot_hz = 0
+                        tuned = bool(vfo_hz is not None and spot_hz
+                                     and spot_hz == int(vfo_hz))
+                        worked = activator in worked_calls
+                        mode = str(s.get("mode", "")).strip()
+                        spots_out.append({
+                            "gs": gs, "activator": activator, "park": park,
+                            "freq_khz": freq_khz, "mode": mode,
+                            "tuned": tuned, "worked": worked,
+                            "lat": lat, "lon": lon,
+                        })
+                    my_grid_data = None
+                    tuned_spot = None
+                    my_gs = (app.cfg.get("gridsquare") or "")[:6].strip().upper()
+                    if len(my_gs) >= 4:
+                        mlat, mlon = grid_to_latlon(my_gs)
+                        if mlat is not None:
+                            my_grid_data = {"gs": my_gs, "lat": mlat, "lon": mlon}
+                    for sp in spots_out:
+                        if sp["tuned"]:
+                            tuned_spot = {"lat": sp["lat"], "lon": sp["lon"]}
+                            break
+                    self._send_json({
+                        "spots": spots_out,
+                        "my_grid": my_grid_data,
+                        "tuned_spot": tuned_spot,
+                    })
+                except Exception as exc:
+                    self._send_json({"error": str(exc)}, status=500)
 
             def log_message(self, fmt, *args):
                 pass  # suppress access log noise
