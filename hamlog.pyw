@@ -1910,32 +1910,23 @@ class POTAHunter(tk.Tk):
                     else:
                         vfo_hz = (app._flrig_freq_hz if app._flrig_freq_hz is not None
                                   else app._pota_clicked_hz)
-                    # Build park-reference → grid map from the parks DB
-                    # (same approach as _draw_map_markers)
+                    # The POTA API includes grid4/grid6 and lat/lon directly
+                    # on each spot — no parks DB lookup needed.
                     filtered = app._pota_spots_filtered or []
-                    refs = list({s.get("reference", s.get("parkReference", ""))
-                                 for s in filtered})
-                    ref_to_grid = {}
-                    if refs:
-                        try:
-                            placeholders = ",".join("?" * len(refs))
-                            with sqlite3.connect(PARKS_DB) as _pk:
-                                park_rows = _pk.execute(
-                                    f"SELECT reference, grid FROM parks "
-                                    f"WHERE reference IN ({placeholders})",
-                                    refs).fetchall()
-                            ref_to_grid = {r[0]: (r[1] or "")[:4]
-                                           for r in park_rows if r[1]}
-                        except Exception:
-                            pass
                     spots_out = []
                     for s in filtered:
                         park = str(s.get("reference", s.get("parkReference", ""))).strip()
-                        gs = ref_to_grid.get(park, "")
-                        if len(gs) < 4:
-                            continue
-                        lat, lon = grid_to_latlon(gs)
-                        if lat is None:
+                        gs = (s.get("grid6") or s.get("grid4") or "")[:6].strip().upper()
+                        # Prefer API-supplied lat/lon; fall back to grid conversion
+                        try:
+                            lat = float(s["latitude"])
+                            lon = float(s["longitude"])
+                        except (KeyError, TypeError, ValueError):
+                            if len(gs) >= 4:
+                                lat, lon = grid_to_latlon(gs)
+                            else:
+                                lat, lon = None, None
+                        if lat is None or lon is None:
                             continue
                         activator = str(s.get("activator",
                                                s.get("activatorCallsign", ""))).strip().upper()
