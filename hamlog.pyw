@@ -1839,6 +1839,14 @@ class POTAHunter(tk.Tk):
             'function refreshData(){\n'
             '  fetch("/data").then(function(r){return r.json();}).then(function(d){\n'
             '    clearMarkers();\n'
+            '    (d.qsos||[]).forEach(function(q){\n'
+            '      var m=L.circleMarker([q.lat,q.lon],'
+            '{radius:6,color:"#cc44ff",fillColor:"#cc44ff",fillOpacity:0.7,weight:1});\n'
+            '      var pop="<b>"+q.call+"</b>";\n'
+            '      if(q.park)pop+=" ["+q.park+"]";\n'
+            '      if(q.band||q.mode)pop+="<br>"+[q.band,q.mode].filter(Boolean).join(" ");\n'
+            '      if(q.date)pop+="<br>"+q.date+" "+q.time_on+"z";\n'
+            '      m.bindPopup(pop);m.addTo(map);markers.push(m);});\n'
             '    (d.spots||[]).forEach(function(s){\n'
             '      var color=s.tuned?"#0077ff":s.worked?"#00bb44":"#ffff00";\n'
             '      var r=s.tuned?9:7;\n'
@@ -1864,7 +1872,7 @@ class POTAHunter(tk.Tk):
             '      beamLine.addTo(map);}\n'
             '    var now=new Date().toLocaleTimeString();\n'
             '    document.getElementById("status").textContent='
-            '"Updated "+now+" — "+( d.spots||[]).length+" spots";'
+            '"Updated "+now+" — "+(d.spots||[]).length+" spots  |  "+(d.qsos||[]).length+" QSOs logged";'
             '  }).catch(function(e){'
             '    document.getElementById("status").textContent="Fetch error: "+e;});}\n'
             'function gcPoints(la1,lo1,la2,lo2,n){\n'
@@ -2011,8 +2019,61 @@ class POTAHunter(tk.Tk):
                         if sp["tuned"]:
                             tuned_spot = {"lat": sp["lat"], "lon": sp["lon"]}
                             break
+                    # Build QSO markers from logged contacts
+                    qsos_out = []
+                    try:
+                        qso_rows = app.conn.execute(
+                            "SELECT call, gridsquare, park_nr, date, time_on, band, mode "
+                            "FROM qso ORDER BY date DESC, time_on DESC"
+                        ).fetchall()
+                        # Pre-fetch park lat/lon for any park_nr references
+                        park_latlon = {}
+                        park_nrs = list({r[2] for r in qso_rows if r[2]})
+                        if park_nrs and os.path.exists(PARKS_DB):
+                            try:
+                                with sqlite3.connect(PARKS_DB) as _pk:
+                                    placeholders = ",".join("?" * len(park_nrs))
+                                    rows_pk = _pk.execute(
+                                        f"SELECT reference, latitude, longitude, grid "
+                                        f"FROM parks WHERE reference IN ({placeholders})",
+                                        park_nrs
+                                    ).fetchall()
+                                for ref, plat, plon, pgrid in rows_pk:
+                                    try:
+                                        park_latlon[ref] = (float(plat), float(plon))
+                                    except (TypeError, ValueError):
+                                        if pgrid and len(pgrid) >= 4:
+                                            park_latlon[ref] = grid_to_latlon(pgrid)
+                            except Exception:
+                                pass
+                        seen = set()
+                        for r in qso_rows:
+                            call, gs, park_nr, date, time_on, band, mode = r
+                            call = (call or "").upper().strip()
+                            if not call:
+                                continue
+                            key = (call, gs or "", park_nr or "")
+                            if key in seen:
+                                continue
+                            seen.add(key)
+                            lat, lon = None, None
+                            if gs and len(gs) >= 4:
+                                lat, lon = grid_to_latlon(gs)
+                            if (lat is None or lon is None) and park_nr and park_nr in park_latlon:
+                                lat, lon = park_latlon[park_nr]
+                            if lat is None or lon is None:
+                                continue
+                            qsos_out.append({
+                                "call": call, "park": park_nr or "",
+                                "gs": gs or "", "date": date or "",
+                                "time_on": time_on or "", "band": band or "",
+                                "mode": mode or "", "lat": lat, "lon": lon,
+                            })
+                    except Exception:
+                        pass
                     self._send_json({
                         "spots": spots_out,
+                        "qsos": qsos_out,
                         "my_grid": my_grid_data,
                         "tuned_spot": tuned_spot,
                     })
