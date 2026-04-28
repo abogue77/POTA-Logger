@@ -1046,6 +1046,14 @@ def grid_to_latlon(gs):
     except (ValueError, IndexError):
         return None, None
 
+def lat_lon_to_itu_region(lat, lon):
+    if lon <= -30:
+        return 2
+    elif lon <= 60:
+        return 1
+    else:
+        return 3
+
 # ══════════════════════════════════════════════════════════════════════════════
 class POTAHunter(tk.Tk):
     def __init__(self):
@@ -1076,6 +1084,9 @@ class POTAHunter(tk.Tk):
         self._pota_band_var  = tk.StringVar(value="All")
         self._pota_mode_var  = tk.StringVar(value="All")
         self._pota_hide_qrt  = tk.BooleanVar(value=False)
+        self._pota_itu_r1    = tk.BooleanVar(value=True)
+        self._pota_itu_r2    = tk.BooleanVar(value=True)
+        self._pota_itu_r3    = tk.BooleanVar(value=True)
         self._pota_clicked_hz    = None
         self._pota_scan_active       = False
         self._pota_scan_idx          = 0
@@ -1097,6 +1108,9 @@ class POTAHunter(tk.Tk):
         self._map_flash_state   = False
         self._map_flash_id      = None
         self._map_flash_grids   = set()
+        self._map_spot_flash_state = False
+        self._map_spot_flash_id    = None
+        self._map_spot_flash_grids = set()
         self._map_marker_items  = {}
         self._map_scan_blink_st = False
         self._map_scan_blink_id = None
@@ -1621,6 +1635,9 @@ class POTAHunter(tk.Tk):
         self._map_flash_grids = flash_gs
         if flash_gs and not self._map_flash_id:
             self._map_flash_tick()
+        self._map_spot_flash_grids = active_only_gs
+        if active_only_gs and not self._map_spot_flash_id:
+            self._map_spot_flash_tick()
         if self._map_my_px and self._map_tuned_px:
             self._start_map_beam()
         else:
@@ -1708,6 +1725,20 @@ class POTAHunter(tk.Tk):
                     pass
         self._map_flash_id = self.after(750, self._map_flash_tick)
 
+    def _map_spot_flash_tick(self):
+        if not self._map_spot_flash_grids:
+            self._map_spot_flash_id = None
+            return
+        self._map_spot_flash_state = not self._map_spot_flash_state
+        color = YELLOW if self._map_spot_flash_state else MAP_GLOW
+        for gs in self._map_spot_flash_grids:
+            for item_id in self._map_marker_items.get(gs, []):
+                try:
+                    self._map_canvas.itemconfig(item_id, fill=color)
+                except Exception:
+                    pass
+        self._map_spot_flash_id = self.after(750, self._map_spot_flash_tick)
+
     def _map_scan_blink_tick(self):
         if not self._pota_scan_active:
             if hasattr(self, '_map_canvas'):
@@ -1793,7 +1824,9 @@ class POTAHunter(tk.Tk):
             'background:rgba(0,0,0,.6);color:#aaa;font:11px monospace;padding:4px 8px;'
             'border-radius:4px;pointer-events:none;}'
             '.beam-anim{animation:beam-flow 0.9s linear infinite;}'
-            '@keyframes beam-flow{to{stroke-dashoffset:-20;}}</style>'
+            '@keyframes beam-flow{to{stroke-dashoffset:-20;}}'
+            '@keyframes spot-flash{0%,100%{opacity:1}50%{opacity:0.1}}'
+            '.spot-flash{animation:spot-flash 1.5s ease-in-out infinite;}</style>'
             '</head><body><div id="map"></div><div id="status">Loading…</div><script>\n'
             'var map=L.map("map",{center:[20,0],zoom:2});\n'
             'L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",'
@@ -1809,8 +1842,9 @@ class POTAHunter(tk.Tk):
             '    (d.spots||[]).forEach(function(s){\n'
             '      var color=s.tuned?"#0077ff":s.worked?"#00bb44":"#ffff00";\n'
             '      var r=s.tuned?9:7;\n'
+            '      var cls=(!s.tuned&&!s.worked)?"spot-flash":"";\n'
             '      var m=L.circleMarker([s.lat,s.lon],'
-            '{radius:r,color:color,fillColor:color,fillOpacity:0.85,weight:s.tuned?2:1});\n'
+            '{radius:r,color:color,fillColor:color,fillOpacity:0.85,weight:s.tuned?2:1,className:cls});\n'
             '      var pop=s.activator+" ["+s.park+"]<br>"+s.freq_khz+" kHz "+s.mode;\n'
             '      if(s.tuned)pop+="<br><b>&#x25CF; TUNED</b>";\n'
             '      if(s.worked)pop+="<br><b>Worked</b>";\n'
@@ -2048,6 +2082,12 @@ class POTAHunter(tk.Tk):
         ttk.Checkbutton(
             tb, text="Hide QRT", variable=self._pota_hide_qrt,
             command=self._apply_pota_filters).pack(side="left", padx=(10, 0))
+        tk.Label(tb, text="ITU:", bg=PBGK, fg=FG2, font=SM).pack(side="left", padx=(10, 2))
+        for _rgn, _var in (("R1", self._pota_itu_r1),
+                            ("R2", self._pota_itu_r2),
+                            ("R3", self._pota_itu_r3)):
+            ttk.Checkbutton(tb, text=_rgn, variable=_var,
+                            command=self._apply_pota_filters).pack(side="left", padx=(0, 2))
         self._pota_pause_btn = tk.Button(
             tb, text="⏸ Pause Updates", bg=BG3, fg=FG, font=SM,
             relief="flat", cursor="hand2", padx=8, width=16,
@@ -2158,6 +2198,18 @@ class POTAHunter(tk.Tk):
             spots = [s for s in spots
                      if "qrt" not in str(
                          s.get("comments", s.get("comment", ""))).lower()]
+
+        sel_regions = set()
+        if self._pota_itu_r1.get(): sel_regions.add(1)
+        if self._pota_itu_r2.get(): sel_regions.add(2)
+        if self._pota_itu_r3.get(): sel_regions.add(3)
+        if sel_regions and sel_regions != {1, 2, 3}:
+            def _region(s):
+                try:
+                    return lat_lon_to_itu_region(float(s["latitude"]), float(s["longitude"]))
+                except (KeyError, TypeError, ValueError):
+                    return None
+            spots = [s for s in spots if _region(s) in sel_regions]
 
         all_bands = sorted({
             freq_to_band(float(s.get("frequency", s.get("freq", 0)) or 0) / 1000)
@@ -2915,6 +2967,9 @@ class POTAHunter(tk.Tk):
         self._pota_band_var  = tk.StringVar(value="All")
         self._pota_mode_var  = tk.StringVar(value="All")
         self._pota_hide_qrt  = tk.BooleanVar(value=False)
+        self._pota_itu_r1    = tk.BooleanVar(value=True)
+        self._pota_itu_r2    = tk.BooleanVar(value=True)
+        self._pota_itu_r3    = tk.BooleanVar(value=True)
         self._pota_clicked_hz = None
         self._map_markers    = {}
         self._map_drawn      = False
