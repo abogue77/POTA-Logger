@@ -1930,6 +1930,9 @@ header::after{content:'';position:absolute;inset:0;pointer-events:none;backgroun
 .spot-flash{animation:spot-flash 1.5s ease-in-out infinite;}
 ::-webkit-scrollbar{width:3px;}
 ::-webkit-scrollbar-thumb{background:var(--red-dim);}
+#scan-btn{cursor:pointer;font-family:'Orbitron',sans-serif;font-size:.6rem;letter-spacing:2px;padding:4px 12px;border:1px solid currentColor;transition:all .2s;user-select:none;}
+#scan-btn.active{color:var(--green);border-color:var(--green);text-shadow:0 0 8px var(--green);}
+#scan-btn.paused{color:var(--red);border-color:var(--red-dim);}
 </style>
 </head>
 <body>
@@ -1937,9 +1940,10 @@ header::after{content:'';position:absolute;inset:0;pointer-events:none;backgroun
   <div class="logo">// <span>POTA Hunter</span></div>
   <div class="hdr-mid">
     <span><span class="status-dot"></span>POTA HUNTER</span>
-    <span id="clock">--:--:-- UTC</span>
+    <span id="clock">--:--:-- ZULU</span>
+    <span id="mycall" style="color:var(--cyan);font-family:'Orbitron',sans-serif;font-size:.7rem;letter-spacing:3px;"></span>
   </div>
-  <div style="font-size:.58rem;letter-spacing:2px;color:var(--dim);">SPOTS LIVE</div>
+  <div id="scan-btn" class="paused">⏸ SCAN PAUSED</div>
 </header>
 <div class="app-body">
   <div class="panel">
@@ -2006,10 +2010,7 @@ function updateStatsPanel(d){
   }).join('');}
 function updateSpotsPanel(d){
   var spots=(d.spots||[]).slice();
-  spots.sort(function(a,b){
-    if(a.tuned!==b.tuned)return a.tuned?-1:1;
-    if(a.worked!==b.worked)return a.worked?-1:1;
-    return(a.freq_khz||0)-(b.freq_khz||0);});
+  spots.sort(function(a,b){return(a.spot_time||'').localeCompare(b.spot_time||'');});
   var el=document.getElementById('spots-list');
   if(!spots.length){el.innerHTML='<div class="no-spots">NO ACTIVE SPOTS<br><br>Enable POTA scan to<br>populate this panel</div>';return;}
   el.innerHTML=spots.map(function(s,i){
@@ -2067,6 +2068,10 @@ function refreshData(){
       beamLine.addTo(map);}
     updateStatsPanel(d);
     updateSpotsPanel(d);
+    var sb=document.getElementById('scan-btn');
+    if(d.scanning){sb.className='active';sb.textContent='▶ SCANNING';}
+    else{sb.className='paused';sb.textContent='⏸ SCAN PAUSED';}
+    if(d.callsign){document.getElementById('mycall').textContent=d.callsign;}
   }).catch(function(e){console.error('Fetch error:',e);});}
 function gcPoints(la1,lo1,la2,lo2,n){
   var R=Math.PI/180;
@@ -2084,11 +2089,12 @@ function gcPoints(la1,lo1,la2,lo2,n){
 function updateClock(){
   var n=new Date();
   document.getElementById('clock').textContent=
-    ('0'+n.getUTCHours()).slice(-2)+':'+('0'+n.getUTCMinutes()).slice(-2)+':'+('0'+n.getUTCSeconds()).slice(-2)+' UTC';}
+    ('0'+n.getUTCHours()).slice(-2)+':'+('0'+n.getUTCMinutes()).slice(-2)+':'+('0'+n.getUTCSeconds()).slice(-2)+' ZULU';}
 setInterval(updateClock,1000);updateClock();
 refreshData();
 setInterval(refreshData,2000);
 map.on('click',function(){fetch('/scan',{method:'POST'});});
+document.getElementById('scan-btn').addEventListener('click',function(e){e.stopPropagation();fetch('/scan',{method:'POST'});});
 </script>
 </body>
 </html>"""
@@ -2204,6 +2210,7 @@ map.on('click',function(){fetch('/scan',{method:'POST'});});
                             "freq_khz": freq_khz, "mode": mode,
                             "tuned": tuned, "worked": worked,
                             "lat": lat, "lon": lon,
+                            "spot_time": str(s.get("spotTime", s.get("timestamp", ""))),
                         })
                     my_grid_data = None
                     tuned_spot = None
@@ -2273,6 +2280,8 @@ map.on('click',function(){fetch('/scan',{method:'POST'});});
                         "qsos": qsos_out,
                         "my_grid": my_grid_data,
                         "tuned_spot": tuned_spot,
+                        "scanning": app._pota_scan_active,
+                        "callsign": app.cfg.get("callsign", ""),
                     })
                 except Exception as exc:
                     self._send_json({"error": str(exc)}, status=500)
