@@ -1930,9 +1930,19 @@ header::after{content:'';position:absolute;inset:0;pointer-events:none;backgroun
 .spot-flash{animation:spot-flash 1.5s ease-in-out infinite;}
 ::-webkit-scrollbar{width:3px;}
 ::-webkit-scrollbar-thumb{background:var(--red-dim);}
-#scan-btn{cursor:pointer;font-family:'Orbitron',sans-serif;font-size:.6rem;letter-spacing:2px;padding:4px 12px;border:1px solid currentColor;transition:all .2s;user-select:none;}
+#scan-btn{cursor:pointer;font-family:'Orbitron',sans-serif;font-size:.6rem;letter-spacing:2px;padding:4px 12px;border:1px solid currentColor;transition:all .2s;user-select:none;pointer-events:all;}
 #scan-btn.active{color:var(--green);border-color:var(--green);text-shadow:0 0 8px var(--green);}
 #scan-btn.paused{color:var(--red);border-color:var(--red-dim);}
+.map-overlays{position:absolute;top:10px;right:14px;z-index:500;display:flex;gap:8px;pointer-events:none;}
+#snipe-btn{width:100%;padding:6px 0;font-family:'Orbitron',sans-serif;font-size:.58rem;letter-spacing:2px;background:transparent;border:1px solid var(--green);color:var(--green);cursor:pointer;text-shadow:0 0 6px rgba(0,255,136,.4);transition:all .2s;}
+#snipe-btn:hover{background:rgba(0,255,136,.08);box-shadow:0 0 10px rgba(0,255,136,.2);}
+#snipe-popup{position:absolute;top:14px;left:50%;transform:translateX(-50%);z-index:500;background:rgba(7,13,18,.97);border:1px solid var(--green);padding:12px 16px;min-width:280px;box-shadow:0 0 20px rgba(0,255,136,.15);}
+.snipe-header{display:flex;justify-content:space-between;align-items:center;font-family:'Orbitron',sans-serif;font-size:.65rem;letter-spacing:2px;color:var(--green);margin-bottom:10px;border-bottom:1px solid var(--border);padding-bottom:6px;}
+.snipe-row{display:flex;align-items:center;gap:8px;margin-bottom:5px;}
+.snipe-row label{font-size:.55rem;letter-spacing:1px;color:var(--dim);width:68px;flex-shrink:0;}
+.snipe-row input{flex:1;background:rgba(255,255,255,.04);border:1px solid var(--border);color:var(--text);font-family:'Share Tech Mono',monospace;font-size:.7rem;padding:3px 6px;}
+#snipe-submit{font-family:'Orbitron',sans-serif;font-size:.58rem;letter-spacing:2px;background:transparent;border:1px solid var(--cyan);color:var(--cyan);padding:5px 16px;cursor:pointer;}
+#snipe-submit:hover{background:rgba(0,229,255,.1);}
 </style>
 </head>
 <body>
@@ -1943,7 +1953,6 @@ header::after{content:'';position:absolute;inset:0;pointer-events:none;backgroun
     <span id="clock">--:--:-- ZULU</span>
     <span id="mycall" style="color:var(--cyan);font-family:'Orbitron',sans-serif;font-size:.7rem;letter-spacing:3px;"></span>
   </div>
-  <div id="scan-btn" class="paused">⏸ SCAN PAUSED</div>
 </header>
 <div class="app-body">
   <div class="panel">
@@ -1963,9 +1972,30 @@ header::after{content:'';position:absolute;inset:0;pointer-events:none;backgroun
       <div class="chips" id="stat-bands">
         <div style="color:var(--dim);font-size:.6rem;letter-spacing:2px">NO SPOTS</div>
       </div>
+      <div class="panel-title" style="margin-top:8px">◈ LOG</div>
+      <button id="snipe-btn">⊕ SNIPE QSO</button>
     </div>
   </div>
   <div class="map-area">
+    <div class="map-overlays">
+      <div id="scan-btn" class="paused">⏸ SCAN PAUSED</div>
+    </div>
+    <div id="snipe-popup" style="display:none">
+      <div class="snipe-header">
+        <span>⊕ SNIPE QSO</span>
+        <span id="snipe-close" style="cursor:pointer;color:var(--red)">✕</span>
+      </div>
+      <div class="snipe-row"><label>CALLSIGN</label><input id="sq-call" maxlength="11"></div>
+      <div class="snipe-row"><label>RST SENT</label><input id="sq-rst-s" maxlength="5" value="59"></div>
+      <div class="snipe-row"><label>RST RCVD</label><input id="sq-rst-r" maxlength="5" value="59"></div>
+      <div class="snipe-row"><label>PARK #</label><input id="sq-park" maxlength="11"></div>
+      <div class="snipe-row"><label>GRID</label><input id="sq-grid" maxlength="7"></div>
+      <div class="snipe-row"><label>COMMENTS</label><input id="sq-comment" maxlength="40"></div>
+      <div style="text-align:center;margin-top:8px">
+        <button id="snipe-submit">LOG QSO</button>
+        <span id="snipe-status" style="font-size:.55rem;color:var(--green);margin-left:8px"></span>
+      </div>
+    </div>
     <div id="map"></div>
   </div>
   <div class="panel right">
@@ -2032,8 +2062,10 @@ function updateSpotsPanel(d){
       fetch('/tune',{method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({activator:s.activator,park:s.park,freq_khz:s.freq_khz,mode:s.mode,tuned:s.tuned})});
     });});}
+var lastSpotData=null;
 function refreshData(){
   fetch('/data').then(function(r){return r.json();}).then(function(d){
+    lastSpotData=d;
     clearMarkers();
     (d.qsos||[]).forEach(function(q){
       var m=L.circleMarker([q.lat,q.lon],{radius:6,color:'#cc44ff',fillColor:'#cc44ff',fillOpacity:0.7,weight:1});
@@ -2095,6 +2127,45 @@ refreshData();
 setInterval(refreshData,2000);
 map.on('click',function(){fetch('/scan',{method:'POST'});});
 document.getElementById('scan-btn').addEventListener('click',function(e){e.stopPropagation();fetch('/scan',{method:'POST'});});
+document.getElementById('snipe-btn').addEventListener('click',function(){
+  var popup=document.getElementById('snipe-popup');
+  if(popup.style.display!=='none'){popup.style.display='none';return;}
+  var tuned=lastSpotData&&lastSpotData.spots?lastSpotData.spots.find(function(s){return s.tuned;}):null;
+  document.getElementById('sq-call').value=tuned?tuned.activator:'';
+  document.getElementById('sq-park').value=tuned?tuned.park:'';
+  document.getElementById('sq-grid').value=tuned?(tuned.gs||''):'';
+  document.getElementById('sq-rst-s').value='59';
+  document.getElementById('sq-rst-r').value='59';
+  document.getElementById('sq-comment').value='';
+  document.getElementById('snipe-status').textContent='';
+  popup.style.display='block';
+});
+document.getElementById('snipe-close').addEventListener('click',function(e){
+  e.stopPropagation();
+  document.getElementById('snipe-popup').style.display='none';
+});
+document.getElementById('snipe-submit').addEventListener('click',function(e){
+  e.stopPropagation();
+  var call=document.getElementById('sq-call').value.trim().toUpperCase();
+  if(!call){document.getElementById('snipe-status').textContent='CALLSIGN REQUIRED';return;}
+  var payload={
+    call:call,
+    rst_sent:document.getElementById('sq-rst-s').value.trim()||'59',
+    rst_rcvd:document.getElementById('sq-rst-r').value.trim()||'59',
+    park_nr:document.getElementById('sq-park').value.trim(),
+    gridsquare:document.getElementById('sq-grid').value.trim().toUpperCase(),
+    comment:document.getElementById('sq-comment').value.trim()
+  };
+  fetch('/log',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
+    .then(function(r){return r.json();})
+    .then(function(r){
+      if(r.ok){
+        document.getElementById('snipe-status').textContent='LOGGED ✔';
+        setTimeout(function(){document.getElementById('snipe-popup').style.display='none';},1200);
+      }else{document.getElementById('snipe-status').textContent=r.error||'ERROR';}
+    })
+    .catch(function(){document.getElementById('snipe-status').textContent='ERROR';});
+});
 </script>
 </body>
 </html>"""
@@ -2299,6 +2370,21 @@ document.getElementById('scan-btn').addEventListener('click',function(e){e.stopP
                 elif self.path == '/scan':
                     app.after(0, app._toggle_pota_scan)
                     self._send_json({"ok": True})
+                elif self.path == '/log':
+                    try:
+                        length = int(self.headers.get('Content-Length', 0))
+                        data = json.loads(self.rfile.read(length))
+                    except Exception:
+                        self._send_json({"error": "bad json"}, status=400)
+                        return
+                    import queue as _queue
+                    result_q = _queue.Queue()
+                    app.after(0, lambda d=data, q=result_q: app._log_qso_from_map(d, q))
+                    try:
+                        result = result_q.get(timeout=5)
+                    except _queue.Empty:
+                        result = {"error": "timeout"}
+                    self._send_json(result)
                 else:
                     self._send_json({"error": "not found"}, status=404)
 
@@ -3005,6 +3091,65 @@ document.getElementById('scan-btn').addEventListener('click',function(e){e.stopP
         self._refresh_pota_highlights()
         self._maybe_post_pota_spot(row)
         self._clear_form()
+
+    def _log_qso_from_map(self, data, result_q=None):
+        def _reply(r):
+            if result_q is not None:
+                result_q.put(r)
+        if not self.adif_path:
+            _reply({"error": "No logbook open"})
+            return
+        call = str(data.get("call", "")).strip().upper()
+        if not call:
+            _reply({"error": "Callsign required"})
+            return
+        now = datetime.datetime.utcnow()
+        if self._flrig_freq_hz is not None:
+            try:
+                freq_mhz = float(self._flrig_freq_hz) / 1_000_000
+            except Exception:
+                freq_mhz = float(self._flrig_freq_hz)
+            band = freq_to_band(freq_mhz)
+            mode = str(self._flrig_mode).upper() if self._flrig_mode else ""
+        else:
+            freq_mhz = None
+            band = ""
+            mode = ""
+        row = {
+            "call":       call,
+            "date":       now.strftime("%Y-%m-%d"),
+            "time_on":    now.strftime("%H%M"),
+            "freq":       freq_mhz,
+            "band":       band,
+            "mode":       mode,
+            "rst_sent":   str(data.get("rst_sent", "")).strip() or "59",
+            "rst_rcvd":   str(data.get("rst_rcvd", "")).strip() or "59",
+            "name":       "",
+            "qth":        "",
+            "gridsquare": str(data.get("gridsquare", "")).strip().upper(),
+            "park_nr":    str(data.get("park_nr", "")).strip(),
+            "comment":    str(data.get("comment", "")).strip(),
+            "notes":      "",
+        }
+        try:
+            self.conn.execute("""
+                INSERT INTO qso (call,date,time_on,freq,band,mode,
+                    rst_sent,rst_rcvd,name,qth,gridsquare,park_nr,comment,notes)
+                VALUES (:call,:date,:time_on,:freq,:band,:mode,
+                    :rst_sent,:rst_rcvd,:name,:qth,:gridsquare,:park_nr,:comment,:notes)
+            """, row)
+            self.conn.commit()
+            mycall = self.cfg.get("callsign", "").upper()
+            with open(self.adif_path, "a", encoding="utf-8") as f:
+                f.write(row_to_adif(row, mycall))
+            self._reload_table()
+            self._refresh_pota_highlights()
+            freq_disp = f"{freq_mhz:.4f} MHz" if freq_mhz else "freq unknown"
+            self._set_status(
+                f"Snipe ✔  {call}  {row['date']} {row['time_on']}z  {freq_disp}  {band}  {mode}")
+            _reply({"ok": True})
+        except Exception as exc:
+            _reply({"error": str(exc)})
 
     def _maybe_post_pota_spot(self, row):
         if not self._pota_respot_enabled.get():
