@@ -2014,47 +2014,42 @@ var map=L.map('map',{center:[20,0],zoom:2});
 L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{
   attribution:'&copy; OpenStreetMap contributors &copy; CARTO',
   subdomains:'abcd',maxZoom:19}).addTo(map);
-var radarLayer=null,radarEnabled=false,radarFrames=[],radarFrameIndex=0,radarAnimTimer=null;
+var radarLayer=null,radarEnabled=false,radarRefreshTimer=null;
 var RADAR_OPACITY=0.5;
 function buildRadarUrl(host,path){return host+path+'/256/{z}/{x}/{y}/6/1_1.png';}
-function showRadarFrame(frame){
-  if(radarLayer){map.removeLayer(radarLayer);radarLayer=null;}
-  radarLayer=L.tileLayer(buildRadarUrl(frame.host,frame.path),{opacity:RADAR_OPACITY,attribution:'Weather: <a href="https://rainviewer.com" target="_blank">RainViewer</a>',maxZoom:19,zIndex:5});
-  radarLayer.addTo(map);}
-function startRadarAnimation(){
-  if(!radarFrames.length)return;
-  radarFrameIndex=radarFrames.length-1;
-  showRadarFrame(radarFrames[radarFrameIndex]);
-  radarAnimTimer=setInterval(function(){
-    radarFrameIndex=(radarFrameIndex+1)%radarFrames.length;
-    showRadarFrame(radarFrames[radarFrameIndex]);
-  },800);}
-function stopRadarAnimation(){
-  if(radarAnimTimer){clearInterval(radarAnimTimer);radarAnimTimer=null;}
-  if(radarLayer){map.removeLayer(radarLayer);radarLayer=null;}}
-function fetchRadarFrames(cb){
+function applyRadarLayer(host,path){
+  var url=buildRadarUrl(host,path);
+  if(radarLayer){radarLayer.setUrl(url);}
+  else{radarLayer=L.tileLayer(url,{opacity:RADAR_OPACITY,attribution:'Weather: <a href="https://rainviewer.com" target="_blank">RainViewer</a>',maxZoom:19,zIndex:5});radarLayer.addTo(map);}}
+function fetchLatestRadar(cb){
   var ctrl=new AbortController(),timer=setTimeout(function(){ctrl.abort();},8000);
   fetch('https://api.rainviewer.com/public/weather-maps.json',{signal:ctrl.signal})
     .then(function(r){clearTimeout(timer);if(!r.ok)throw new Error('HTTP '+r.status);return r.json();})
     .then(function(data){
       var host=data.host||'https://tilecache.rainviewer.com';
       var past=(data.radar&&data.radar.past)?data.radar.past:[];
-      var nowcast=(data.radar&&data.radar.nowcast)?data.radar.nowcast:[];
-      var frames=past.concat(nowcast).filter(function(f){return f&&f.path;}).map(function(f){return {host:host,path:f.path};});
-      if(frames.length){cb(null,frames);}else{cb('No frames',[]);}
-    }).catch(function(e){clearTimeout(timer);cb(String(e),[]);});}
+      var latest=past[past.length-1];
+      if(latest&&latest.path){cb(null,host,latest.path);}else{cb('No radar data',null,null);}
+    }).catch(function(e){clearTimeout(timer);cb(String(e),null,null);});}
+function refreshRadar(){
+  fetchLatestRadar(function(err,host,path){
+    if(err){console.warn('[radar]',err);return;}
+    applyRadarLayer(host,path);});}
 function enableRadar(){
   radarEnabled=true;
   var btn=document.getElementById('radar-btn');
   btn.className='on';btn.textContent='◉ RADAR ON';
-  fetchRadarFrames(function(err,frames){
+  fetchLatestRadar(function(err,host,path){
     if(err){
       console.warn('[radar]',err);
       radarEnabled=false;btn.className='off';btn.textContent='◎ RADAR ERR';
       setTimeout(function(){btn.textContent='◎ RADAR OFF';},3000);return;}
-    radarFrames=frames;startRadarAnimation();});}
+    applyRadarLayer(host,path);
+    radarRefreshTimer=setInterval(refreshRadar,300000);});}
 function disableRadar(){
-  radarEnabled=false;stopRadarAnimation();radarFrames=[];
+  radarEnabled=false;
+  if(radarRefreshTimer){clearInterval(radarRefreshTimer);radarRefreshTimer=null;}
+  if(radarLayer){map.removeLayer(radarLayer);radarLayer=null;}
   var btn=document.getElementById('radar-btn');btn.className='off';btn.textContent='◎ RADAR OFF';}
 var markers=[],beamLine=null;
 var BAND_COLORS={'160m':'#ff4444','80m':'#ff8800','60m':'#ffcc00','40m':'#aaff00',
