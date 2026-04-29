@@ -1095,6 +1095,9 @@ class POTAHunter(tk.Tk):
         self._pota_scan_skip_worked  = tk.BooleanVar(value=False)
         self._pota_spot_ctx          = None
         self._pota_respot_enabled    = tk.BooleanVar(value=False)
+        self._map_filter_bands       = set()
+        self._map_filter_modes       = set()
+        self._map_filter_itu         = set()
         self._map_server             = None
         self._map_server_port        = None
         self._map_markers       = {}
@@ -2066,6 +2069,11 @@ var filterModes=new Set();
 var filterItu=new Set();
 var hideQrt=false;
 var autoReport=false;
+var filtersSynced=false;
+function syncFiltersToServer(){
+  fetch('/set_map_filters',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({bands:Array.from(filterBands),modes:Array.from(filterModes),itu:Array.from(filterItu)})});
+}
 
 function latLonToItuRegion(lat,lon){
   return lon<=-30?2:lon<=60?1:3;}
@@ -2093,7 +2101,8 @@ function buildFilterChips(containerId,items,activeSet,colorFn,labelFn){
       var v=chip.dataset.val;
       if(typeof v==='string'&&!isNaN(Number(v)))v=Number(v);
       if(activeSet.has(v))activeSet.delete(v);else activeSet.add(v);
-      if(lastSpotData)renderSpotsAndMarkers(lastSpotData);});}); }
+      if(lastSpotData)renderSpotsAndMarkers(lastSpotData);
+      syncFiltersToServer();});}); }
 
 function updateFilterPanels(d){
   var spots=d.spots||[];
@@ -2195,6 +2204,12 @@ function refreshData(){
     if(d.scan_interval){
       document.querySelectorAll('.scan-rate-btn').forEach(function(b){
         b.className='scan-rate-btn'+(Number(b.dataset.rate)===d.scan_interval?' active':'');});}
+    if(!filtersSynced&&d.map_filter_bands!==undefined){
+      filtersSynced=true;
+      if(d.map_filter_bands.length>0)filterBands=new Set(d.map_filter_bands);
+      if(d.map_filter_modes.length>0)filterModes=new Set(d.map_filter_modes);
+      if(d.map_filter_itu.length>0)filterItu=new Set(d.map_filter_itu.map(Number));
+    }
   }).catch(function(e){console.error('Fetch error:',e);});}
 function gcPoints(la1,lo1,la2,lo2,n){
   var R=Math.PI/180;
@@ -2224,7 +2239,8 @@ document.getElementById('stat-itu').addEventListener('click',function(e){
   var v=Number(chip.dataset.itu);
   if(filterItu.has(v))filterItu.delete(v);else filterItu.add(v);
   if(lastSpotData)renderSpotsAndMarkers(lastSpotData);
-  chip.className='filter-chip'+(filterItu.has(v)?' active':'');});
+  chip.className='filter-chip'+(filterItu.has(v)?' active':'');
+  syncFiltersToServer();});
 document.getElementById('hide-qrt-btn').addEventListener('click',function(){
   hideQrt=!hideQrt;
   this.className=hideQrt?'active':'';
@@ -2371,7 +2387,8 @@ document.getElementById('snipe-submit').addEventListener('click',function(e){
                                   else app._pota_clicked_hz)
                     # The POTA API includes grid4/grid6 and lat/lon directly
                     # on each spot — no parks DB lookup needed.
-                    filtered = app._pota_spots_filtered or []
+                    # Serve all raw spots; HTML JS chips handle all display filtering.
+                    filtered = app._pota_spots_raw or []
                     spots_out = []
                     for s in filtered:
                         park = str(s.get("reference", s.get("parkReference", ""))).strip()
@@ -2480,6 +2497,9 @@ document.getElementById('snipe-submit').addEventListener('click',function(e){
                         "hide_qrt": app._pota_hide_qrt.get(),
                         "auto_respot": app._pota_respot_enabled.get(),
                         "scan_interval": app._pota_scan_interval.get(),
+                        "map_filter_bands": list(app._map_filter_bands),
+                        "map_filter_modes": list(app._map_filter_modes),
+                        "map_filter_itu": list(app._map_filter_itu),
                     })
                 except Exception as exc:
                     self._send_json({"error": str(exc)}, status=500)
@@ -2562,7 +2582,23 @@ document.getElementById('snipe-submit').addEventListener('click',function(e){
                         self._send_json({"error": "bad json"}, status=400)
                         return
                     val = bool(data.get('enabled', False))
-                    app.after(0, lambda v=val: app._pota_hide_qrt.set(v))
+                    def _set_hqrt(v=val):
+                        app._pota_hide_qrt.set(v)
+                        app._apply_pota_filters()
+                    app.after(0, _set_hqrt)
+                    self._send_json({"ok": True})
+                elif self.path == '/set_map_filters':
+                    try:
+                        length = int(self.headers.get('Content-Length', 0))
+                        data = json.loads(self.rfile.read(length))
+                    except Exception:
+                        self._send_json({"error": "bad json"}, status=400)
+                        return
+                    def _set_mf(d=data):
+                        app._map_filter_bands = set(d.get('bands', []))
+                        app._map_filter_modes = set(d.get('modes', []))
+                        app._map_filter_itu   = set(int(x) for x in d.get('itu', []))
+                    app.after(0, _set_mf)
                     self._send_json({"ok": True})
                 else:
                     self._send_json({"error": "not found"}, status=404)
