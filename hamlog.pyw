@@ -1892,7 +1892,7 @@ header{height:62px;display:flex;align-items:center;justify-content:space-between
 header::after{content:'';position:absolute;inset:0;pointer-events:none;background:repeating-linear-gradient(90deg,transparent,transparent 60px,rgba(255,20,20,.025) 60px,rgba(255,20,20,.025) 61px);}
 .logo{font-family:'Orbitron',sans-serif;font-weight:900;font-size:1.2rem;color:var(--red);letter-spacing:4px;text-shadow:0 0 20px rgba(255,32,32,.8),0 0 40px rgba(255,32,32,.3);}
 .logo span{color:#fff;}
-.hdr-mid{display:flex;gap:18px;align-items:center;font-size:.85rem;letter-spacing:2px;color:var(--dim);}
+.hdr-mid{display:flex;gap:36px;align-items:center;font-size:.85rem;letter-spacing:2px;color:var(--dim);}
 .status-dot{width:11px;height:11px;border-radius:50%;display:inline-block;margin-right:5px;}
 .status-dot.connected{background:var(--green);box-shadow:0 0 8px var(--green);animation:sdpulse-green 1.5s ease-in-out infinite;}
 .status-dot.offline{background:var(--red);box-shadow:0 0 6px var(--red);animation:sdpulse-red 1.5s ease-in-out infinite;}
@@ -1936,7 +1936,8 @@ header::after{content:'';position:absolute;inset:0;pointer-events:none;backgroun
 #scan-btn{cursor:pointer;font-family:'Orbitron',sans-serif;font-size:.6rem;letter-spacing:2px;padding:4px 12px;border:1px solid currentColor;transition:all .2s;user-select:none;}
 #scan-btn.active{color:var(--green);border-color:var(--green);text-shadow:0 0 8px var(--green);}
 #scan-btn.paused{color:var(--red);border-color:var(--red-dim);}
-#scan-overlay{position:absolute;top:8px;left:50%;transform:translateX(-50%);z-index:1000;font-family:'Orbitron',sans-serif;font-size:.85rem;letter-spacing:4px;color:#00e5ff;text-shadow:0 0 12px #00e5ff;background:rgba(3,6,9,.8);padding:4px 18px;border:1px solid #00e5ff;pointer-events:none;display:none;}
+#scan-overlay{position:absolute;top:8px;left:50%;transform:translateX(-50%);z-index:1000;font-family:'Orbitron',sans-serif;font-size:.85rem;letter-spacing:4px;color:#00e5ff;text-shadow:0 0 12px #00e5ff;background:rgba(3,6,9,.8);padding:4px 18px;border:1px solid #00e5ff;pointer-events:none;display:none;white-space:nowrap;}
+#scan-dots{display:inline-block;width:2ch;text-align:left;}
 .stn-box{border:1px solid;padding:7px 10px;margin-top:3px;flex-shrink:0;}
 .stn-box.logged{border-color:#00ff88;background:rgba(0,255,136,.04);}
 .stn-box.tuned-s{border-color:#00e5ff;background:rgba(0,229,255,.04);}
