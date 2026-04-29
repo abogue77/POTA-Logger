@@ -1888,15 +1888,18 @@ class POTAHunter(tk.Tk):
 *{margin:0;padding:0;box-sizing:border-box;}
 html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);font-family:'Share Tech Mono',monospace;}
 body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:9000;background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,.07) 2px,rgba(0,0,0,.07) 4px);}
-header{height:52px;display:flex;align-items:center;justify-content:space-between;padding:0 24px;border-bottom:1px solid var(--red);background:linear-gradient(90deg,#0a0002,#0d0008,#0a0002);position:relative;z-index:1000;flex-shrink:0;}
+header{height:62px;display:flex;align-items:center;justify-content:space-between;padding:0 24px;border-bottom:1px solid var(--red);background:linear-gradient(90deg,#0a0002,#0d0008,#0a0002);position:relative;z-index:1000;flex-shrink:0;}
 header::after{content:'';position:absolute;inset:0;pointer-events:none;background:repeating-linear-gradient(90deg,transparent,transparent 60px,rgba(255,20,20,.025) 60px,rgba(255,20,20,.025) 61px);}
 .logo{font-family:'Orbitron',sans-serif;font-weight:900;font-size:1.2rem;color:var(--red);letter-spacing:4px;text-shadow:0 0 20px rgba(255,32,32,.8),0 0 40px rgba(255,32,32,.3);}
 .logo span{color:#fff;}
-.hdr-mid{display:flex;gap:18px;align-items:center;font-size:.63rem;letter-spacing:2px;color:var(--dim);}
-.status-dot{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green);animation:sdpulse 1.5s ease-in-out infinite;display:inline-block;margin-right:5px;}
-@keyframes sdpulse{0%,100%{opacity:1;box-shadow:0 0 8px var(--green)}50%{opacity:.4;box-shadow:0 0 2px var(--green)}}
-#clock{font-family:'Orbitron',sans-serif;font-size:.7rem;color:var(--amber);letter-spacing:2px;}
-.app-body{display:flex;height:calc(100vh - 52px);}
+.hdr-mid{display:flex;gap:18px;align-items:center;font-size:.85rem;letter-spacing:2px;color:var(--dim);}
+.status-dot{width:11px;height:11px;border-radius:50%;display:inline-block;margin-right:5px;}
+.status-dot.connected{background:var(--green);box-shadow:0 0 8px var(--green);animation:sdpulse-green 1.5s ease-in-out infinite;}
+.status-dot.offline{background:var(--red);box-shadow:0 0 6px var(--red);animation:sdpulse-red 1.5s ease-in-out infinite;}
+@keyframes sdpulse-green{0%,100%{opacity:1;box-shadow:0 0 8px var(--green)}50%{opacity:.4;box-shadow:0 0 2px var(--green)}}
+@keyframes sdpulse-red{0%,100%{opacity:1;box-shadow:0 0 8px var(--red)}50%{opacity:.4;box-shadow:0 0 2px var(--red)}}
+#clock{font-family:'Orbitron',sans-serif;font-size:.95rem;color:var(--amber);letter-spacing:2px;}
+.app-body{display:flex;height:calc(100vh - 62px);}
 .panel{width:240px;flex-shrink:0;background:var(--panel);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden;}
 .panel.right{width:260px;border-right:none;border-left:1px solid var(--border);}
 .panel-inner{flex:1;overflow-y:auto;padding:13px;display:flex;flex-direction:column;gap:9px;}
@@ -1912,7 +1915,7 @@ header::after{content:'';position:absolute;inset:0;pointer-events:none;backgroun
 .map-area{flex:1;position:relative;overflow:hidden;}
 #map{width:100%;height:100%;background:#020810;}
 .spot-item{background:rgba(255,255,255,.015);border:1px solid var(--border);padding:7px 10px;cursor:pointer;transition:all .15s;flex-shrink:0;border-left:3px solid var(--dim);}
-.spot-item:hover{background:rgba(0,119,255,.07);box-shadow:0 0 10px rgba(0,119,255,.1);}
+.spot-item:hover{background:rgba(0,229,255,.07);box-shadow:0 0 10px rgba(0,229,255,.1);}
 .spot-item.tuned{border-left-color:var(--cyan);background:rgba(0,229,255,.05);}
 .spot-item.tuned:hover{background:rgba(0,229,255,.09);}
 .spot-item.worked{border-left-color:#00bb44;}
@@ -1933,15 +1936,24 @@ header::after{content:'';position:absolute;inset:0;pointer-events:none;backgroun
 #scan-btn{cursor:pointer;font-family:'Orbitron',sans-serif;font-size:.6rem;letter-spacing:2px;padding:4px 12px;border:1px solid currentColor;transition:all .2s;user-select:none;}
 #scan-btn.active{color:var(--green);border-color:var(--green);text-shadow:0 0 8px var(--green);}
 #scan-btn.paused{color:var(--red);border-color:var(--red-dim);}
+#scan-overlay{position:absolute;top:8px;left:50%;transform:translateX(-50%);z-index:1000;font-family:'Orbitron',sans-serif;font-size:.85rem;letter-spacing:4px;color:#00e5ff;text-shadow:0 0 12px #00e5ff;background:rgba(3,6,9,.8);padding:4px 18px;border:1px solid #00e5ff;pointer-events:none;display:none;}
+.stn-box{border:1px solid;padding:7px 10px;margin-top:3px;flex-shrink:0;}
+.stn-box.logged{border-color:#00ff88;background:rgba(0,255,136,.04);}
+.stn-box.tuned-s{border-color:#00e5ff;background:rgba(0,229,255,.04);}
+.stn-call{font-family:'Orbitron',sans-serif;font-size:.72rem;letter-spacing:1px;}
+.stn-call.logged{color:#00ff88;text-shadow:0 0 6px rgba(0,255,136,.4);}
+.stn-call.tuned-s{color:#00e5ff;text-shadow:0 0 6px rgba(0,229,255,.4);}
+.stn-detail{font-size:.56rem;color:var(--dim);margin-top:3px;line-height:1.7;}
+.stn-detail span{display:block;}
 </style>
 </head>
 <body>
 <header>
   <div class="logo">// <span>POTA Hunter</span></div>
   <div class="hdr-mid">
-    <span><span class="status-dot"></span>POTA HUNTER</span>
+    <span><span class="status-dot offline" id="status-dot"></span><span id="status-text">OFFLINE</span></span>
     <span id="clock">--:--:-- ZULU</span>
-    <span id="mycall" style="color:var(--cyan);font-family:'Orbitron',sans-serif;font-size:.7rem;letter-spacing:3px;"></span>
+    <span id="mycall" style="color:var(--cyan);font-family:'Orbitron',sans-serif;font-size:.95rem;letter-spacing:3px;"></span>
   </div>
   <div id="scan-btn" class="paused">⏸ SCAN PAUSED</div>
 </header>
@@ -1963,9 +1975,22 @@ header::after{content:'';position:absolute;inset:0;pointer-events:none;backgroun
       <div class="chips" id="stat-bands">
         <div style="color:var(--dim);font-size:.6rem;letter-spacing:2px">NO SPOTS</div>
       </div>
+      <div class="panel-title" style="margin-top:6px">◈ LAST LOGGED</div>
+      <div id="last-logged-box" class="stn-box logged" style="display:none">
+        <div class="stn-call logged" id="ll-call"></div>
+        <div class="stn-detail" id="ll-detail"></div>
+      </div>
+      <div style="color:var(--dim);font-size:.56rem;letter-spacing:1px" id="ll-empty">NO LOGGED QSOs</div>
+      <div class="panel-title" style="margin-top:6px">◈ TUNED STATION</div>
+      <div id="tuned-station-box" class="stn-box tuned-s" style="display:none">
+        <div class="stn-call tuned-s" id="ts-call"></div>
+        <div class="stn-detail" id="ts-detail"></div>
+      </div>
+      <div style="color:var(--dim);font-size:.56rem;letter-spacing:1px" id="ts-empty">NO TUNED STATION</div>
     </div>
   </div>
   <div class="map-area">
+    <div id="scan-overlay">SCANNING<span id="scan-dots">.</span></div>
     <div id="map"></div>
   </div>
   <div class="panel right">
@@ -2003,11 +2028,36 @@ function updateStatsPanel(d){
   var bc={};
   spots.forEach(function(s){var b=freqToBand(s.freq_khz);bc[b]=(bc[b]||0)+1;});
   var keys=Object.keys(bc),bandsEl=document.getElementById('stat-bands');
-  if(!keys.length){bandsEl.innerHTML='<div style="color:var(--dim);font-size:.6rem;letter-spacing:2px">NO SPOTS</div>';return;}
-  bandsEl.innerHTML=keys.sort().map(function(b){
+  if(!keys.length){bandsEl.innerHTML='<div style="color:var(--dim);font-size:.6rem;letter-spacing:2px">NO SPOTS</div>';}
+  else{bandsEl.innerHTML=keys.sort().map(function(b){
     var c=BAND_COLORS[b]||'#aaa';
     return '<div class="chip" style="border-color:'+c+';color:'+c+'"><strong>'+bc[b]+'</strong> '+b+'</div>';
   }).join('');}
+  var llBox=document.getElementById('last-logged-box');
+  var llEmpty=document.getElementById('ll-empty');
+  if(d.last_qso){
+    var lq=d.last_qso;
+    document.getElementById('ll-call').textContent=lq.call;
+    var det='';
+    if(lq.gs)det+='<span>Grid: '+lq.gs+'</span>';
+    if(lq.park)det+='<span>Park: '+lq.park+(lq.park_name?' — '+lq.park_name:'')+'</span>';
+    if(lq.band||lq.mode)det+='<span>'+(lq.band||'')+' '+(lq.mode||'')+'</span>';
+    document.getElementById('ll-detail').innerHTML=det;
+    llBox.style.display='block';llEmpty.style.display='none';
+  }else{llBox.style.display='none';llEmpty.style.display='block';}
+  var tsBox=document.getElementById('tuned-station-box');
+  var tsEmpty=document.getElementById('ts-empty');
+  if(d.tuned_spot&&d.tuned_spot.activator){
+    var ts=d.tuned_spot;
+    document.getElementById('ts-call').textContent=ts.activator;
+    var tdet='';
+    if(ts.gs)tdet+='<span>Grid: '+ts.gs+'</span>';
+    if(ts.park)tdet+='<span>Park: '+ts.park+(ts.park_name?' — '+ts.park_name:'')+'</span>';
+    var mhz=ts.freq_khz?(ts.freq_khz/1000).toFixed(3)+' MHz':'';
+    if(mhz||ts.mode)tdet+='<span>'+[mhz,ts.mode].filter(Boolean).join(' ')+'</span>';
+    document.getElementById('ts-detail').innerHTML=tdet;
+    tsBox.style.display='block';tsEmpty.style.display='none';
+  }else{tsBox.style.display='none';tsEmpty.style.display='block';}}
 function updateSpotsPanel(d){
   var spots=(d.spots||[]).slice();
   spots.sort(function(a,b){return(a.spot_time||'').localeCompare(b.spot_time||'');});
@@ -2043,7 +2093,7 @@ function refreshData(){
       if(q.date)pop+='<br>'+q.date+' '+q.time_on+'z';
       m.bindPopup(pop);m.addTo(map);markers.push(m);});
     (d.spots||[]).forEach(function(s){
-      var color=s.tuned?'#0077ff':s.worked?'#00bb44':'#ffff00';
+      var color=s.tuned?'#00e5ff':s.worked?'#00bb44':'#ffff00';
       var r=s.tuned?9:7;
       var cls=(!s.tuned&&!s.worked)?'spot-flash':'';
       var m=L.circleMarker([s.lat,s.lon],{radius:r,color:color,fillColor:color,fillOpacity:0.85,weight:s.tuned?2:1,className:cls});
@@ -2064,14 +2114,19 @@ function refreshData(){
       star.bindPopup('My grid: '+mg.gs);star.addTo(map);markers.push(star);}
     if(d.my_grid&&d.tuned_spot){
       var gcp=gcPoints(d.my_grid.lat,d.my_grid.lon,d.tuned_spot.lat,d.tuned_spot.lon,60);
-      beamLine=L.polyline(gcp,{color:'#0077ff',weight:2.5,dashArray:'12 8',opacity:0.85,className:'beam-anim'});
+      beamLine=L.polyline(gcp,{color:'#00e5ff',weight:2.5,dashArray:'12 8',opacity:0.85,className:'beam-anim'});
       beamLine.addTo(map);}
     updateStatsPanel(d);
     updateSpotsPanel(d);
     var sb=document.getElementById('scan-btn');
     if(d.scanning){sb.className='active';sb.textContent='▶ SCANNING';}
     else{sb.className='paused';sb.textContent='⏸ SCAN PAUSED';}
+    document.getElementById('scan-overlay').style.display=d.scanning?'block':'none';
     if(d.callsign){document.getElementById('mycall').textContent=d.callsign;}
+    var dot=document.getElementById('status-dot');
+    var stxt=document.getElementById('status-text');
+    if(d.flrig_connected){dot.className='status-dot connected';stxt.textContent='CONNECTED';}
+    else{dot.className='status-dot offline';stxt.textContent='OFFLINE';}
   }).catch(function(e){console.error('Fetch error:',e);});}
 function gcPoints(la1,lo1,la2,lo2,n){
   var R=Math.PI/180;
@@ -2091,6 +2146,12 @@ function updateClock(){
   document.getElementById('clock').textContent=
     ('0'+n.getUTCHours()).slice(-2)+':'+('0'+n.getUTCMinutes()).slice(-2)+':'+('0'+n.getUTCSeconds()).slice(-2)+' ZULU';}
 setInterval(updateClock,1000);updateClock();
+var _dotPhase=0;
+setInterval(function(){
+  _dotPhase=(_dotPhase+1)%3;
+  var el=document.getElementById('scan-dots');
+  if(el)el.textContent='.'.repeat(_dotPhase+1);
+},500);
 refreshData();
 setInterval(refreshData,2000);
 map.on('click',function(){fetch('/scan',{method:'POST'});});
@@ -2205,9 +2266,10 @@ document.getElementById('scan-btn').addEventListener('click',function(e){e.stopP
                                      and spot_hz == int(vfo_hz))
                         worked = activator in worked_calls
                         mode = str(s.get("mode", "")).strip()
+                        park_name = str(s.get("name", s.get("parkName", ""))).strip()
                         spots_out.append({
                             "gs": gs, "activator": activator, "park": park,
-                            "freq_khz": freq_khz, "mode": mode,
+                            "park_name": park_name, "freq_khz": freq_khz, "mode": mode,
                             "tuned": tuned, "worked": worked,
                             "lat": lat, "lon": lon,
                             "spot_time": str(s.get("spotTime", s.get("timestamp", ""))),
@@ -2221,7 +2283,12 @@ document.getElementById('scan-btn').addEventListener('click',function(e){e.stopP
                             my_grid_data = {"gs": my_gs, "lat": mlat, "lon": mlon}
                     for sp in spots_out:
                         if sp["tuned"]:
-                            tuned_spot = {"lat": sp["lat"], "lon": sp["lon"]}
+                            tuned_spot = {
+                                "lat": sp["lat"], "lon": sp["lon"],
+                                "activator": sp["activator"], "park": sp["park"],
+                                "park_name": sp["park_name"], "gs": sp["gs"],
+                                "freq_khz": sp["freq_khz"], "mode": sp["mode"],
+                            }
                             break
                     # Build QSO markers from logged contacts
                     qsos_out = []
@@ -2230,19 +2297,21 @@ document.getElementById('scan-btn').addEventListener('click',function(e){e.stopP
                             "SELECT call, gridsquare, park_nr, date, time_on, band, mode "
                             "FROM qso ORDER BY date DESC, time_on DESC"
                         ).fetchall()
-                        # Pre-fetch park lat/lon for any park_nr references
+                        # Pre-fetch park lat/lon and name for any park_nr references
                         park_latlon = {}
+                        park_names = {}
                         park_nrs = list({r[2] for r in qso_rows if r[2]})
                         if park_nrs and os.path.exists(PARKS_DB):
                             try:
                                 with sqlite3.connect(PARKS_DB) as _pk:
                                     placeholders = ",".join("?" * len(park_nrs))
                                     rows_pk = _pk.execute(
-                                        f"SELECT reference, latitude, longitude, grid "
+                                        f"SELECT reference, latitude, longitude, grid, name "
                                         f"FROM parks WHERE reference IN ({placeholders})",
                                         park_nrs
                                     ).fetchall()
-                                for ref, plat, plon, pgrid in rows_pk:
+                                for ref, plat, plon, pgrid, pname in rows_pk:
+                                    park_names[ref] = pname or ""
                                     try:
                                         park_latlon[ref] = (float(plat), float(plon))
                                     except (TypeError, ValueError):
@@ -2269,6 +2338,7 @@ document.getElementById('scan-btn').addEventListener('click',function(e){e.stopP
                                 continue
                             qsos_out.append({
                                 "call": call, "park": park_nr or "",
+                                "park_name": park_names.get(park_nr, "") if park_nr else "",
                                 "gs": gs or "", "date": date or "",
                                 "time_on": time_on or "", "band": band or "",
                                 "mode": mode or "", "lat": lat, "lon": lon,
@@ -2282,6 +2352,8 @@ document.getElementById('scan-btn').addEventListener('click',function(e){e.stopP
                         "tuned_spot": tuned_spot,
                         "scanning": app._pota_scan_active,
                         "callsign": app.cfg.get("callsign", ""),
+                        "flrig_connected": app._flrig_freq_hz is not None,
+                        "last_qso": qsos_out[0] if qsos_out else None,
                     })
                 except Exception as exc:
                     self._send_json({"error": str(exc)}, status=500)
