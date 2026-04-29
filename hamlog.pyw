@@ -1946,6 +1946,9 @@ header::after{content:'';position:absolute;inset:0;pointer-events:none;backgroun
 .stn-call.tuned-s{color:#00e5ff;text-shadow:0 0 6px rgba(0,229,255,.4);}
 .stn-detail{font-size:.56rem;color:var(--dim);margin-top:3px;line-height:1.7;}
 .stn-detail span{display:block;}
+#radar-btn{cursor:pointer;font-family:'Orbitron',sans-serif;font-size:.6rem;letter-spacing:2px;padding:4px 12px;border:1px solid currentColor;transition:all .2s;user-select:none;margin-left:8px;}
+#radar-btn.off{color:var(--dim);border-color:var(--dim);}
+#radar-btn.on{color:var(--cyan);border-color:var(--cyan);text-shadow:0 0 8px rgba(0,229,255,.7);}
 </style>
 </head>
 <body>
@@ -1956,7 +1959,10 @@ header::after{content:'';position:absolute;inset:0;pointer-events:none;backgroun
     <span id="clock">--:--:-- ZULU</span>
     <span id="mycall" style="color:var(--cyan);font-family:'Orbitron',sans-serif;font-size:.95rem;letter-spacing:3px;"></span>
   </div>
-  <div id="scan-btn" class="paused">⏸ SCAN PAUSED</div>
+  <div style="display:flex;align-items:center;gap:0;">
+    <div id="scan-btn" class="paused">⏸ SCAN PAUSED</div>
+    <div id="radar-btn" class="off">◎ RADAR OFF</div>
+  </div>
 </header>
 <div class="app-body">
   <div class="panel">
@@ -2008,6 +2014,47 @@ var map=L.map('map',{center:[20,0],zoom:2});
 L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{
   attribution:'&copy; OpenStreetMap contributors &copy; CARTO',
   subdomains:'abcd',maxZoom:19}).addTo(map);
+var radarLayer=null,radarEnabled=false,radarTimestamps=[],radarFrameIndex=0,radarAnimTimer=null;
+var RADAR_SIZE=512,RADAR_COLOR=6,RADAR_OPTIONS='1_1',RADAR_OPACITY=0.5;
+function buildRadarUrl(ts){return 'https://tilecache.rainviewer.com/v2/radar/'+ts+'/'+RADAR_SIZE+'/{z}/{x}/{y}/'+RADAR_COLOR+'/'+RADAR_OPTIONS+'.png';}
+function showRadarFrame(ts){
+  if(radarLayer){map.removeLayer(radarLayer);radarLayer=null;}
+  radarLayer=L.tileLayer(buildRadarUrl(ts),{opacity:RADAR_OPACITY,attribution:'Weather: <a href="https://rainviewer.com" target="_blank">RainViewer</a>',maxZoom:19,tileSize:RADAR_SIZE,zIndex:5});
+  radarLayer.addTo(map);}
+function startRadarAnimation(){
+  if(!radarTimestamps.length)return;
+  radarFrameIndex=radarTimestamps.length-1;
+  showRadarFrame(radarTimestamps[radarFrameIndex]);
+  radarAnimTimer=setInterval(function(){
+    radarFrameIndex=(radarFrameIndex+1)%radarTimestamps.length;
+    showRadarFrame(radarTimestamps[radarFrameIndex]);
+  },800);}
+function stopRadarAnimation(){
+  if(radarAnimTimer){clearInterval(radarAnimTimer);radarAnimTimer=null;}
+  if(radarLayer){map.removeLayer(radarLayer);radarLayer=null;}}
+function fetchRadarTimestamps(cb){
+  var ctrl=new AbortController(),timer=setTimeout(function(){ctrl.abort();},8000);
+  fetch('https://api.rainviewer.com/public/weather-maps.json',{signal:ctrl.signal})
+    .then(function(r){clearTimeout(timer);if(!r.ok)throw new Error('HTTP '+r.status);return r.json();})
+    .then(function(data){
+      var past=(data.radar&&data.radar.past)?data.radar.past:[];
+      var nowcast=(data.radar&&data.radar.nowcast)?data.radar.nowcast:[];
+      var ts=past.concat(nowcast).map(function(f){return f.time;}).filter(Boolean);
+      if(ts.length){cb(null,ts);}else{cb('No frames',[]);}
+    }).catch(function(e){clearTimeout(timer);cb(String(e),[]);});}
+function enableRadar(){
+  radarEnabled=true;
+  var btn=document.getElementById('radar-btn');
+  btn.className='on';btn.textContent='◉ RADAR ON';
+  fetchRadarTimestamps(function(err,ts){
+    if(err){
+      console.warn('[radar]',err);
+      radarEnabled=false;btn.className='off';btn.textContent='◎ RADAR ERR';
+      setTimeout(function(){btn.textContent='◎ RADAR OFF';},3000);return;}
+    radarTimestamps=ts;startRadarAnimation();});}
+function disableRadar(){
+  radarEnabled=false;stopRadarAnimation();radarTimestamps=[];
+  var btn=document.getElementById('radar-btn');btn.className='off';btn.textContent='◎ RADAR OFF';}
 var markers=[],beamLine=null;
 var BAND_COLORS={'160m':'#ff4444','80m':'#ff8800','60m':'#ffcc00','40m':'#aaff00',
   '30m':'#00ffaa','20m':'#00e5ff','17m':'#0088ff','15m':'#8844ff',
@@ -2157,6 +2204,7 @@ refreshData();
 setInterval(refreshData,2000);
 map.on('click',function(){fetch('/scan',{method:'POST'});});
 document.getElementById('scan-btn').addEventListener('click',function(e){e.stopPropagation();fetch('/scan',{method:'POST'});});
+document.getElementById('radar-btn').addEventListener('click',function(e){e.stopPropagation();if(radarEnabled){disableRadar();}else{enableRadar();}});
 </script>
 </body>
 </html>"""
