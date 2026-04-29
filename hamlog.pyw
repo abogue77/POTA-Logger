@@ -26,6 +26,8 @@ import re
 import json
 import tempfile
 import webbrowser
+import http.server
+import socketserver
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 LOGBOOK_DIR = os.path.join(os.path.expanduser("~"), "HamLog")
@@ -33,9 +35,6 @@ os.makedirs(LOGBOOK_DIR, exist_ok=True)
 CONFIG_FILE   = os.path.join(LOGBOOK_DIR, "config.json")
 PARKS_DB      = os.path.join(LOGBOOK_DIR, "pota_parks.db")
 PARKS_CSV_URL = "https://pota.app/all_parks_ext.csv"
-MAP_STATE_FILE    = os.path.join(LOGBOOK_DIR, "map_state.json")
-MAP_COMMANDS_FILE = os.path.join(LOGBOOK_DIR, "map_commands.json")
-MAP_RESULTS_FILE  = os.path.join(LOGBOOK_DIR, "map_results.json")
 
 # ── Config ────────────────────────────────────────────────────────────────────
 DEFAULT_CONFIG = {
@@ -1096,6 +1095,8 @@ class POTAHunter(tk.Tk):
         self._pota_scan_skip_worked  = tk.BooleanVar(value=False)
         self._pota_spot_ctx          = None
         self._pota_respot_enabled    = tk.BooleanVar(value=False)
+        self._map_server             = None
+        self._map_server_port        = None
         self._map_markers       = {}
         self._map_drawn         = False
         self._map_resize_id     = None
@@ -1133,11 +1134,7 @@ class POTAHunter(tk.Tk):
         if self.cfg["qrz_user"] and self.cfg["qrz_pass"]:
             threading.Thread(target=self._qrz_login_bg, daemon=True).start()
 
-        self._map_cmd_poll_id    = None
-        self._map_state_write_id = None
         self._start_flrig_poll()
-        self._start_map_command_poll()
-        self._start_map_state_write()
         self.after(1500, self._check_parks_db_on_startup)
 
     # ── TTK style ─────────────────────────────────────────────────────────
@@ -1868,26 +1865,450 @@ class POTAHunter(tk.Tk):
             self._map_canvas.delete("beam_line")
 
     def _open_leaflet_map(self):
-        import subprocess, sys
         if not self._pota_loaded:
             self._pota_loaded = True
             threading.Thread(target=self._fetch_pota_spots, daemon=True).start()
-        self._write_map_state()
-        here = os.path.dirname(os.path.abspath(__file__))
-        potamap = os.path.join(here, "potamap.py")
-        if not os.path.exists(potamap):
-            messagebox.showerror("Map", f"potamap.py not found:\n{potamap}")
-            return
-        try:
-            if sys.platform == "win32":
-                subprocess.Popen(
-                    [sys.executable, potamap],
-                    creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
-                )
-            else:
-                subprocess.Popen([sys.executable, potamap], start_new_session=True)
-        except Exception as e:
-            messagebox.showerror("Map", f"Could not launch potamap.py:\n{e}")
+        if self._map_server is None:
+            self._start_map_server()
+        if self._map_server_port:
+            webbrowser.open(f"http://localhost:{self._map_server_port}")
+
+    def _start_map_server(self):
+        app = self
+        MAP_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>POTA Hunter — Live Map</title>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+:root{--red:#ff2020;--red-dim:#8b0000;--amber:#ff9900;--green:#00ff88;--cyan:#00e5ff;--bg:#030609;--panel:#070d12;--border:#1a3040;--text:#c8dde8;--dim:#3a5060;}
+*{margin:0;padding:0;box-sizing:border-box;}
+html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);font-family:'Share Tech Mono',monospace;}
+body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:9000;background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,.07) 2px,rgba(0,0,0,.07) 4px);}
+header{height:52px;display:flex;align-items:center;justify-content:space-between;padding:0 24px;border-bottom:1px solid var(--red);background:linear-gradient(90deg,#0a0002,#0d0008,#0a0002);position:relative;z-index:1000;flex-shrink:0;}
+header::after{content:'';position:absolute;inset:0;pointer-events:none;background:repeating-linear-gradient(90deg,transparent,transparent 60px,rgba(255,20,20,.025) 60px,rgba(255,20,20,.025) 61px);}
+.logo{font-family:'Orbitron',sans-serif;font-weight:900;font-size:1.2rem;color:var(--red);letter-spacing:4px;text-shadow:0 0 20px rgba(255,32,32,.8),0 0 40px rgba(255,32,32,.3);}
+.logo span{color:#fff;}
+.hdr-mid{display:flex;gap:18px;align-items:center;font-size:.63rem;letter-spacing:2px;color:var(--dim);}
+.status-dot{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green);animation:sdpulse 1.5s ease-in-out infinite;display:inline-block;margin-right:5px;}
+@keyframes sdpulse{0%,100%{opacity:1;box-shadow:0 0 8px var(--green)}50%{opacity:.4;box-shadow:0 0 2px var(--green)}}
+#clock{font-family:'Orbitron',sans-serif;font-size:.7rem;color:var(--amber);letter-spacing:2px;}
+.app-body{display:flex;height:calc(100vh - 52px);}
+.panel{width:240px;flex-shrink:0;background:var(--panel);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden;}
+.panel.right{width:260px;border-right:none;border-left:1px solid var(--border);}
+.panel-inner{flex:1;overflow-y:auto;padding:13px;display:flex;flex-direction:column;gap:9px;}
+.panel-title{font-family:'Orbitron',sans-serif;font-size:.57rem;letter-spacing:3px;color:var(--red);text-transform:uppercase;padding-bottom:6px;border-bottom:1px solid var(--red-dim);flex-shrink:0;}
+.card{background:rgba(255,255,255,.02);border:1px solid var(--border);padding:8px 11px;position:relative;flex-shrink:0;}
+.card::before{content:'';position:absolute;top:0;left:0;width:3px;height:100%;background:var(--red);}
+.card-label{font-size:.57rem;letter-spacing:2px;color:var(--dim);text-transform:uppercase;margin-bottom:3px;}
+.card-value{font-family:'Orbitron',sans-serif;font-size:1rem;color:var(--amber);text-shadow:0 0 10px rgba(255,153,0,.5);}
+.card-sub{font-size:.6rem;color:var(--dim);margin-top:2px;}
+.chips{display:flex;flex-wrap:wrap;gap:3px;}
+.chip{border:1px solid;padding:2px 7px;font-size:.56rem;letter-spacing:1px;}
+.chip strong{color:var(--amber);}
+.map-area{flex:1;position:relative;overflow:hidden;}
+#map{width:100%;height:100%;background:#020810;}
+.spot-item{background:rgba(255,255,255,.015);border:1px solid var(--border);padding:7px 10px;cursor:pointer;transition:all .15s;flex-shrink:0;border-left:3px solid var(--dim);}
+.spot-item:hover{background:rgba(0,119,255,.07);box-shadow:0 0 10px rgba(0,119,255,.1);}
+.spot-item.tuned{border-left-color:var(--cyan);background:rgba(0,229,255,.05);}
+.spot-item.tuned:hover{background:rgba(0,229,255,.09);}
+.spot-item.worked{border-left-color:#00bb44;}
+.spot-item.worked:hover{background:rgba(0,187,68,.07);}
+.spot-call{font-family:'Orbitron',sans-serif;font-size:.72rem;color:var(--cyan);text-shadow:0 0 6px rgba(0,229,255,.4);display:flex;align-items:center;justify-content:space-between;}
+.spot-badge{font-size:.52rem;letter-spacing:1px;padding:1px 5px;border:1px solid currentColor;}
+.spot-badge.tuned{color:var(--cyan);}
+.spot-badge.worked{color:#00bb44;}
+.spot-meta{font-size:.58rem;color:var(--dim);margin-top:3px;display:flex;gap:7px;flex-wrap:wrap;}
+.spot-park{color:var(--amber);}
+.no-spots{text-align:center;padding:28px 10px;color:var(--dim);font-size:.6rem;letter-spacing:2px;line-height:2;}
+.beam-anim{animation:beam-flow 0.9s linear infinite;}
+@keyframes beam-flow{to{stroke-dashoffset:-20;}}
+@keyframes spot-flash{0%,100%{opacity:1}50%{opacity:0.1}}
+.spot-flash{animation:spot-flash 1.5s ease-in-out infinite;}
+::-webkit-scrollbar{width:3px;}
+::-webkit-scrollbar-thumb{background:var(--red-dim);}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">// <span>POTA Hunter</span></div>
+  <div class="hdr-mid">
+    <span><span class="status-dot"></span>POTA HUNTER</span>
+    <span id="clock">--:--:-- UTC</span>
+  </div>
+  <div style="font-size:.58rem;letter-spacing:2px;color:var(--dim);">SPOTS LIVE</div>
+</header>
+<div class="app-body">
+  <div class="panel">
+    <div class="panel-inner">
+      <div class="panel-title">◈ POTA STATUS</div>
+      <div class="card">
+        <div class="card-label">Active Spots</div>
+        <div class="card-value" id="stat-spots">—</div>
+        <div class="card-sub">Live POTA activations</div>
+      </div>
+      <div class="card">
+        <div class="card-label">QSOs Logged</div>
+        <div class="card-value" id="stat-qsos">—</div>
+        <div class="card-sub">This session</div>
+      </div>
+      <div class="panel-title" style="margin-top:4px">◈ BANDS</div>
+      <div class="chips" id="stat-bands">
+        <div style="color:var(--dim);font-size:.6rem;letter-spacing:2px">NO SPOTS</div>
+      </div>
+    </div>
+  </div>
+  <div class="map-area">
+    <div id="map"></div>
+  </div>
+  <div class="panel right">
+    <div class="panel-inner">
+      <div class="panel-title">◈ ACTIVE SPOTS</div>
+      <div id="spots-list">
+        <div class="no-spots">AWAITING SPOTS...<br><br>Enable POTA scan to<br>populate this panel</div>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+var map=L.map('map',{center:[20,0],zoom:2});
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{
+  attribution:'&copy; OpenStreetMap contributors &copy; CARTO',
+  subdomains:'abcd',maxZoom:19}).addTo(map);
+var markers=[],beamLine=null;
+var BAND_COLORS={'160m':'#ff4444','80m':'#ff8800','60m':'#ffcc00','40m':'#aaff00',
+  '30m':'#00ffaa','20m':'#00e5ff','17m':'#0088ff','15m':'#8844ff',
+  '12m':'#ff44cc','10m':'#ff2288','6m':'#ff0055','2m':'#ff6688','other':'#aaaaaa'};
+function freqToBand(k){
+  if(!k)return 'other';
+  if(k<2000)return '160m';if(k<4000)return '80m';if(k<5500)return '60m';
+  if(k<8000)return '40m';if(k<11000)return '30m';if(k<15500)return '20m';
+  if(k<18500)return '17m';if(k<22000)return '15m';if(k<25000)return '12m';
+  if(k<30000)return '10m';if(k<54000)return '6m';if(k<148000)return '2m';
+  return 'other';}
+function clearMarkers(){
+  markers.forEach(function(m){map.removeLayer(m);});markers=[];
+  if(beamLine){map.removeLayer(beamLine);beamLine=null;}}
+function updateStatsPanel(d){
+  var spots=d.spots||[],qsos=d.qsos||[];
+  document.getElementById('stat-spots').textContent=spots.length||'—';
+  document.getElementById('stat-qsos').textContent=qsos.length||'—';
+  var bc={};
+  spots.forEach(function(s){var b=freqToBand(s.freq_khz);bc[b]=(bc[b]||0)+1;});
+  var keys=Object.keys(bc),bandsEl=document.getElementById('stat-bands');
+  if(!keys.length){bandsEl.innerHTML='<div style="color:var(--dim);font-size:.6rem;letter-spacing:2px">NO SPOTS</div>';return;}
+  bandsEl.innerHTML=keys.sort().map(function(b){
+    var c=BAND_COLORS[b]||'#aaa';
+    return '<div class="chip" style="border-color:'+c+';color:'+c+'"><strong>'+bc[b]+'</strong> '+b+'</div>';
+  }).join('');}
+function updateSpotsPanel(d){
+  var spots=(d.spots||[]).slice();
+  spots.sort(function(a,b){
+    if(a.tuned!==b.tuned)return a.tuned?-1:1;
+    if(a.worked!==b.worked)return a.worked?-1:1;
+    return(a.freq_khz||0)-(b.freq_khz||0);});
+  var el=document.getElementById('spots-list');
+  if(!spots.length){el.innerHTML='<div class="no-spots">NO ACTIVE SPOTS<br><br>Enable POTA scan to<br>populate this panel</div>';return;}
+  el.innerHTML=spots.map(function(s,i){
+    var cls=s.tuned?'tuned':s.worked?'worked':'';
+    var badge=s.tuned?'<span class="spot-badge tuned">&#9679; TUNED</span>'
+      :s.worked?'<span class="spot-badge worked">&#10003; WORKED</span>':'';
+    var mhz=s.freq_khz?(s.freq_khz/1000).toFixed(3)+' MHz':'?';
+    var band=freqToBand(s.freq_khz),bc=BAND_COLORS[band]||'#aaa';
+    return '<div class="spot-item '+cls+'" data-i="'+i+'">'
+      +'<div class="spot-call"><span>'+s.activator+'</span>'+badge+'</div>'
+      +'<div class="spot-meta"><span class="spot-park">'+(s.park||'?')+'</span>'
+      +'<span style="color:'+bc+'">'+band+'</span>'
+      +'<span>'+mhz+'</span><span>'+(s.mode||'')+'</span></div></div>';
+  }).join('');
+  el.querySelectorAll('.spot-item').forEach(function(item){
+    var i=parseInt(item.dataset.i);
+    item.addEventListener('click',function(){
+      var s=spots[i];
+      fetch('/tune',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({activator:s.activator,park:s.park,freq_khz:s.freq_khz,mode:s.mode,tuned:s.tuned})});
+    });});}
+function refreshData(){
+  fetch('/data').then(function(r){return r.json();}).then(function(d){
+    clearMarkers();
+    (d.qsos||[]).forEach(function(q){
+      var m=L.circleMarker([q.lat,q.lon],{radius:6,color:'#cc44ff',fillColor:'#cc44ff',fillOpacity:0.7,weight:1});
+      var pop='<b>'+q.call+'</b>';
+      if(q.park)pop+=' ['+q.park+']';
+      if(q.band||q.mode)pop+='<br>'+[q.band,q.mode].filter(Boolean).join(' ');
+      if(q.date)pop+='<br>'+q.date+' '+q.time_on+'z';
+      m.bindPopup(pop);m.addTo(map);markers.push(m);});
+    (d.spots||[]).forEach(function(s){
+      var color=s.tuned?'#0077ff':s.worked?'#00bb44':'#ffff00';
+      var r=s.tuned?9:7;
+      var cls=(!s.tuned&&!s.worked)?'spot-flash':'';
+      var m=L.circleMarker([s.lat,s.lon],{radius:r,color:color,fillColor:color,fillOpacity:0.85,weight:s.tuned?2:1,className:cls});
+      var pop=s.activator+' ['+s.park+']<br>'+s.freq_khz+' kHz '+s.mode;
+      if(s.tuned)pop+='<br><b>&#x25CF; TUNED</b>';
+      if(s.worked)pop+='<br><b>Worked</b>';
+      m.bindPopup(pop);
+      m.on('click',function(e){
+        L.DomEvent.stopPropagation(e);
+        fetch('/tune',{method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({activator:s.activator,park:s.park,freq_khz:s.freq_khz,mode:s.mode,tuned:s.tuned})});});
+      m.addTo(map);markers.push(m);});
+    if(d.my_grid){
+      var mg=d.my_grid;
+      var star=L.marker([mg.lat,mg.lon],{icon:L.divIcon({
+        html:'<span style="color:#ff2222;font-size:18px;">&#9733;</span>',
+        className:'',iconAnchor:[9,9]})});
+      star.bindPopup('My grid: '+mg.gs);star.addTo(map);markers.push(star);}
+    if(d.my_grid&&d.tuned_spot){
+      var gcp=gcPoints(d.my_grid.lat,d.my_grid.lon,d.tuned_spot.lat,d.tuned_spot.lon,60);
+      beamLine=L.polyline(gcp,{color:'#0077ff',weight:2.5,dashArray:'12 8',opacity:0.85,className:'beam-anim'});
+      beamLine.addTo(map);}
+    updateStatsPanel(d);
+    updateSpotsPanel(d);
+  }).catch(function(e){console.error('Fetch error:',e);});}
+function gcPoints(la1,lo1,la2,lo2,n){
+  var R=Math.PI/180;
+  var f1=la1*R,l1=lo1*R,f2=la2*R,l2=lo2*R;
+  var d=2*Math.asin(Math.sqrt(Math.pow(Math.sin((f2-f1)/2),2)+Math.cos(f1)*Math.cos(f2)*Math.pow(Math.sin((l2-l1)/2),2)));
+  if(d<1e-6)return[[la1,lo1],[la2,lo2]];
+  var pts=[];
+  for(var i=0;i<=n;i++){
+    var f=i/n,A=Math.sin((1-f)*d)/Math.sin(d),B=Math.sin(f*d)/Math.sin(d);
+    var x=A*Math.cos(f1)*Math.cos(l1)+B*Math.cos(f2)*Math.cos(l2);
+    var y=A*Math.cos(f1)*Math.sin(l1)+B*Math.cos(f2)*Math.sin(l2);
+    var z=A*Math.sin(f1)+B*Math.sin(f2);
+    pts.push([Math.atan2(z,Math.sqrt(x*x+y*y))/R,Math.atan2(y,x)/R]);}
+  return pts;}
+function updateClock(){
+  var n=new Date();
+  document.getElementById('clock').textContent=
+    ('0'+n.getUTCHours()).slice(-2)+':'+('0'+n.getUTCMinutes()).slice(-2)+':'+('0'+n.getUTCSeconds()).slice(-2)+' UTC';}
+setInterval(updateClock,1000);updateClock();
+refreshData();
+setInterval(refreshData,2000);
+map.on('click',function(){fetch('/scan',{method:'POST'});});
+</script>
+</body>
+</html>"""
+
+        class _Handler(http.server.BaseHTTPRequestHandler):
+            def _send_json(self, obj, status=200):
+                body = json.dumps(obj).encode()
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(body)
+
+            def do_GET(self):
+                if self.path == '/data':
+                    self._handle_data()
+                elif self.path == '/debug':
+                    self._handle_debug()
+                else:
+                    body = MAP_HTML.encode()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/html; charset=utf-8")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+
+            def _handle_debug(self):
+                filtered = app._pota_spots_filtered or []
+                refs = list({s.get("reference", s.get("parkReference", ""))
+                             for s in filtered})
+                db_exists = os.path.exists(PARKS_DB)
+                db_count = 0
+                db_grid_count = 0
+                db_error = None
+                ref_to_grid = {}
+                if db_exists and refs:
+                    try:
+                        placeholders = ",".join("?" * len(refs))
+                        with sqlite3.connect(PARKS_DB) as _pk:
+                            db_count = _pk.execute(
+                                "SELECT COUNT(*) FROM parks").fetchone()[0]
+                            db_grid_count = _pk.execute(
+                                "SELECT COUNT(*) FROM parks WHERE grid != ''").fetchone()[0]
+                            park_rows = _pk.execute(
+                                f"SELECT reference, grid FROM parks "
+                                f"WHERE reference IN ({placeholders})",
+                                refs).fetchall()
+                        ref_to_grid = {r[0]: r[1] for r in park_rows if r[1]}
+                    except Exception as e:
+                        db_error = str(e)
+                sample = filtered[:3] if filtered else []
+                self._send_json({
+                    "spots_raw_count": len(app._pota_spots_raw),
+                    "spots_filtered_count": len(filtered),
+                    "sample_spot_keys": list(sample[0].keys()) if sample else [],
+                    "sample_refs": refs[:5],
+                    "parks_db_exists": db_exists,
+                    "parks_db_total": db_count,
+                    "parks_db_with_grid": db_grid_count,
+                    "refs_matched_in_db": len(ref_to_grid),
+                    "sample_matches": dict(list(ref_to_grid.items())[:5]),
+                    "db_error": db_error,
+                    "my_grid": app.cfg.get("gridsquare"),
+                })
+
+            def _handle_data(self):
+                try:
+                    worked_calls = set()
+                    try:
+                        worked_calls = {r[0] for r in app.conn.execute(
+                            "SELECT DISTINCT UPPER(TRIM(call)) FROM qso").fetchall() if r[0]}
+                    except Exception:
+                        pass
+                    if (time.monotonic() < app._tune_suppress_until
+                            and app._pota_clicked_hz):
+                        vfo_hz = app._pota_clicked_hz
+                    else:
+                        vfo_hz = (app._flrig_freq_hz if app._flrig_freq_hz is not None
+                                  else app._pota_clicked_hz)
+                    # The POTA API includes grid4/grid6 and lat/lon directly
+                    # on each spot — no parks DB lookup needed.
+                    filtered = app._pota_spots_filtered or []
+                    spots_out = []
+                    for s in filtered:
+                        park = str(s.get("reference", s.get("parkReference", ""))).strip()
+                        gs = (s.get("grid6") or s.get("grid4") or "")[:6].strip().upper()
+                        # Prefer API-supplied lat/lon; fall back to grid conversion
+                        try:
+                            lat = float(s["latitude"])
+                            lon = float(s["longitude"])
+                        except (KeyError, TypeError, ValueError):
+                            if len(gs) >= 4:
+                                lat, lon = grid_to_latlon(gs)
+                            else:
+                                lat, lon = None, None
+                        if lat is None or lon is None:
+                            continue
+                        activator = str(s.get("activator",
+                                               s.get("activatorCallsign", ""))).strip().upper()
+                        try:
+                            freq_khz = float(s.get("frequency", s.get("freq", 0)))
+                            spot_hz = int(freq_khz * 1000)
+                        except (ValueError, TypeError):
+                            freq_khz = 0
+                            spot_hz = 0
+                        tuned = bool(vfo_hz is not None and spot_hz
+                                     and spot_hz == int(vfo_hz))
+                        worked = activator in worked_calls
+                        mode = str(s.get("mode", "")).strip()
+                        spots_out.append({
+                            "gs": gs, "activator": activator, "park": park,
+                            "freq_khz": freq_khz, "mode": mode,
+                            "tuned": tuned, "worked": worked,
+                            "lat": lat, "lon": lon,
+                        })
+                    my_grid_data = None
+                    tuned_spot = None
+                    my_gs = (app.cfg.get("gridsquare") or "")[:6].strip().upper()
+                    if len(my_gs) >= 4:
+                        mlat, mlon = grid_to_latlon(my_gs)
+                        if mlat is not None:
+                            my_grid_data = {"gs": my_gs, "lat": mlat, "lon": mlon}
+                    for sp in spots_out:
+                        if sp["tuned"]:
+                            tuned_spot = {"lat": sp["lat"], "lon": sp["lon"]}
+                            break
+                    # Build QSO markers from logged contacts
+                    qsos_out = []
+                    try:
+                        qso_rows = app.conn.execute(
+                            "SELECT call, gridsquare, park_nr, date, time_on, band, mode "
+                            "FROM qso ORDER BY date DESC, time_on DESC"
+                        ).fetchall()
+                        # Pre-fetch park lat/lon for any park_nr references
+                        park_latlon = {}
+                        park_nrs = list({r[2] for r in qso_rows if r[2]})
+                        if park_nrs and os.path.exists(PARKS_DB):
+                            try:
+                                with sqlite3.connect(PARKS_DB) as _pk:
+                                    placeholders = ",".join("?" * len(park_nrs))
+                                    rows_pk = _pk.execute(
+                                        f"SELECT reference, latitude, longitude, grid "
+                                        f"FROM parks WHERE reference IN ({placeholders})",
+                                        park_nrs
+                                    ).fetchall()
+                                for ref, plat, plon, pgrid in rows_pk:
+                                    try:
+                                        park_latlon[ref] = (float(plat), float(plon))
+                                    except (TypeError, ValueError):
+                                        if pgrid and len(pgrid) >= 4:
+                                            park_latlon[ref] = grid_to_latlon(pgrid)
+                            except Exception:
+                                pass
+                        seen = set()
+                        for r in qso_rows:
+                            call, gs, park_nr, date, time_on, band, mode = r
+                            call = (call or "").upper().strip()
+                            if not call:
+                                continue
+                            key = (call, gs or "", park_nr or "")
+                            if key in seen:
+                                continue
+                            seen.add(key)
+                            lat, lon = None, None
+                            if gs and len(gs) >= 4:
+                                lat, lon = grid_to_latlon(gs)
+                            if (lat is None or lon is None) and park_nr and park_nr in park_latlon:
+                                lat, lon = park_latlon[park_nr]
+                            if lat is None or lon is None:
+                                continue
+                            qsos_out.append({
+                                "call": call, "park": park_nr or "",
+                                "gs": gs or "", "date": date or "",
+                                "time_on": time_on or "", "band": band or "",
+                                "mode": mode or "", "lat": lat, "lon": lon,
+                            })
+                    except Exception:
+                        pass
+                    self._send_json({
+                        "spots": spots_out,
+                        "qsos": qsos_out,
+                        "my_grid": my_grid_data,
+                        "tuned_spot": tuned_spot,
+                    })
+                except Exception as exc:
+                    self._send_json({"error": str(exc)}, status=500)
+
+            def do_POST(self):
+                if self.path == '/tune':
+                    try:
+                        length = int(self.headers.get('Content-Length', 0))
+                        data = json.loads(self.rfile.read(length))
+                    except Exception:
+                        self._send_json({"error": "bad json"}, status=400)
+                        return
+                    app.after(0, lambda d=data: app._on_map_station_click(d))
+                    self._send_json({"ok": True})
+                elif self.path == '/scan':
+                    app.after(0, app._toggle_pota_scan)
+                    self._send_json({"ok": True})
+                else:
+                    self._send_json({"error": "not found"}, status=404)
+
+            def log_message(self, fmt, *args):
+                pass  # suppress access log noise
+
+        class _ReuseServer(socketserver.ThreadingTCPServer):
+            allow_reuse_address = True
+
+        for port in (8765, 8766, 8767):
+            try:
+                server = _ReuseServer(("localhost", port), _Handler)
+                self._map_server = server
+                self._map_server_port = port
+                t = threading.Thread(target=server.serve_forever, daemon=True)
+                t.start()
+                break
+            except OSError:
+                continue
 
     def _start_map_poll(self):
         self._stop_map_poll()
@@ -1908,227 +2329,6 @@ class POTAHunter(tk.Tk):
         if self._map_poll_id:
             self.after_cancel(self._map_poll_id)
             self._map_poll_id = None
-
-    # ── Map IPC (file-based) ──────────────────────────────────────────────
-
-    def _write_map_state(self):
-        """Write current app state to map_state.json for potamap.py to read."""
-        try:
-            worked_calls = set()
-            try:
-                worked_calls = {r[0] for r in self.conn.execute(
-                    "SELECT DISTINCT UPPER(TRIM(call)) FROM qso").fetchall() if r[0]}
-            except Exception:
-                pass
-            if (time.monotonic() < self._tune_suppress_until and self._pota_clicked_hz):
-                vfo_hz = self._pota_clicked_hz
-            else:
-                vfo_hz = self._flrig_freq_hz if self._flrig_freq_hz is not None else self._pota_clicked_hz
-            spots_out = []
-            for s in (self._pota_spots_raw or []):
-                park = str(s.get("reference", s.get("parkReference", ""))).strip()
-                gs = (s.get("grid6") or s.get("grid4") or "")[:6].strip().upper()
-                try:
-                    lat = float(s["latitude"]); lon = float(s["longitude"])
-                except (KeyError, TypeError, ValueError):
-                    if len(gs) >= 4:
-                        lat, lon = grid_to_latlon(gs)
-                    else:
-                        lat, lon = None, None
-                if lat is None or lon is None:
-                    continue
-                activator = str(s.get("activator", s.get("activatorCallsign", ""))).strip().upper()
-                try:
-                    freq_khz = float(s.get("frequency", s.get("freq", 0)))
-                    spot_hz  = int(freq_khz * 1000)
-                except (ValueError, TypeError):
-                    freq_khz = 0; spot_hz = 0
-                tuned  = bool(vfo_hz is not None and spot_hz and spot_hz == int(vfo_hz))
-                worked = activator in worked_calls
-                spots_out.append({
-                    "gs": gs, "activator": activator, "park": park,
-                    "freq_khz": freq_khz, "mode": str(s.get("mode", "")).strip(),
-                    "tuned": tuned, "worked": worked, "lat": lat, "lon": lon,
-                    "spot_time": str(s.get("spotTime", s.get("timestamp", ""))),
-                    "comment": str(s.get("comments", s.get("comment", ""))).lower(),
-                })
-            my_grid_data = None; tuned_spot = None
-            my_gs = (self.cfg.get("gridsquare") or "")[:6].strip().upper()
-            if len(my_gs) >= 4:
-                mlat, mlon = grid_to_latlon(my_gs)
-                if mlat is not None:
-                    my_grid_data = {"gs": my_gs, "lat": mlat, "lon": mlon}
-            for sp in spots_out:
-                if sp["tuned"]:
-                    tuned_spot = {"lat": sp["lat"], "lon": sp["lon"]}
-                    break
-            qsos_out = []
-            try:
-                qso_rows = self.conn.execute(
-                    "SELECT call, gridsquare, park_nr, date, time_on, band, mode "
-                    "FROM qso ORDER BY date DESC, time_on DESC"
-                ).fetchall()
-                park_latlon = {}
-                park_nrs = list({r[2] for r in qso_rows if r[2]})
-                if park_nrs and os.path.exists(PARKS_DB):
-                    try:
-                        with sqlite3.connect(PARKS_DB) as _pk:
-                            ph = ",".join("?" * len(park_nrs))
-                            for ref, plat, plon, pgrid in _pk.execute(
-                                f"SELECT reference,latitude,longitude,grid FROM parks WHERE reference IN ({ph})",
-                                park_nrs
-                            ).fetchall():
-                                try:
-                                    park_latlon[ref] = (float(plat), float(plon))
-                                except (TypeError, ValueError):
-                                    if pgrid and len(pgrid) >= 4:
-                                        park_latlon[ref] = grid_to_latlon(pgrid)
-                    except Exception:
-                        pass
-                seen = set()
-                for r in qso_rows:
-                    call, gs, park_nr, date, time_on, band, mode = r
-                    call = (call or "").upper().strip()
-                    if not call:
-                        continue
-                    key = (call, gs or "", park_nr or "")
-                    if key in seen:
-                        continue
-                    seen.add(key)
-                    lat = lon = None
-                    if gs and len(gs) >= 4:
-                        lat, lon = grid_to_latlon(gs)
-                    if (lat is None or lon is None) and park_nr and park_nr in park_latlon:
-                        lat, lon = park_latlon[park_nr]
-                    if lat is None or lon is None:
-                        continue
-                    qsos_out.append({
-                        "call": call, "park": park_nr or "", "gs": gs or "",
-                        "date": date or "", "time_on": time_on or "",
-                        "band": band or "", "mode": mode or "", "lat": lat, "lon": lon,
-                    })
-            except Exception:
-                pass
-            sel_regions = []
-            if self._pota_itu_r1.get(): sel_regions.append(1)
-            if self._pota_itu_r2.get(): sel_regions.append(2)
-            if self._pota_itu_r3.get(): sel_regions.append(3)
-            state = {
-                "written_at":   time.time(),
-                "callsign":     self.cfg.get("callsign", ""),
-                "my_grid":      my_grid_data,
-                "scanning":     self._pota_scan_active,
-                "scan_interval": self._pota_scan_interval.get(),
-                "hide_qrt":     self._pota_hide_qrt.get(),
-                "auto_respot":  self._pota_respot_enabled.get(),
-                "filter_itu":   sel_regions,
-                "vfo_hz":       vfo_hz,
-                "spots":        spots_out,
-                "qsos":         qsos_out,
-                "tuned_spot":   tuned_spot,
-            }
-            tmp = MAP_STATE_FILE + ".tmp"
-            with open(tmp, "w", encoding="utf-8") as f:
-                json.dump(state, f)
-            os.replace(tmp, MAP_STATE_FILE)
-        except Exception:
-            pass
-
-    def _start_map_state_write(self):
-        self._map_state_write_id = None
-        self._do_map_state_write()
-
-    def _do_map_state_write(self):
-        self._write_map_state()
-        self._map_state_write_id = self.after(2000, self._do_map_state_write)
-
-    def _write_map_result(self, cmd_id, result):
-        """Append a command result to map_results.json for potamap.py to read."""
-        try:
-            now = time.time()
-            existing = []
-            if os.path.exists(MAP_RESULTS_FILE):
-                try:
-                    with open(MAP_RESULTS_FILE, "r", encoding="utf-8") as f:
-                        existing = json.load(f).get("results", [])
-                except Exception:
-                    existing = []
-            existing = [r for r in existing if now - r.get("written_at", 0) < 30]
-            existing.append({
-                "id": cmd_id,
-                "ok": result.get("ok", False),
-                "error": result.get("error"),
-                "written_at": now,
-            })
-            tmp = MAP_RESULTS_FILE + ".tmp"
-            with open(tmp, "w", encoding="utf-8") as f:
-                json.dump({"results": existing}, f)
-            os.replace(tmp, MAP_RESULTS_FILE)
-        except Exception:
-            pass
-
-    def _start_map_command_poll(self):
-        self._map_cmd_poll_id = None
-        self._do_map_command_poll()
-
-    def _do_map_command_poll(self):
-        try:
-            if os.path.exists(MAP_COMMANDS_FILE):
-                try:
-                    with open(MAP_COMMANDS_FILE, "r", encoding="utf-8") as f:
-                        payload = json.load(f)
-                except Exception:
-                    payload = None
-                if payload and payload.get("commands"):
-                    try:
-                        os.replace(MAP_COMMANDS_FILE, MAP_COMMANDS_FILE + ".processed")
-                    except OSError:
-                        pass
-                    for cmd in payload["commands"]:
-                        self._handle_map_command(cmd)
-        except Exception:
-            pass
-        self._map_cmd_poll_id = self.after(500, self._do_map_command_poll)
-
-    def _handle_map_command(self, cmd):
-        ctype  = cmd.get("type", "")
-        data   = cmd.get("data", {})
-        cmd_id = cmd.get("id", "")
-        if ctype == "tune":
-            self._on_map_station_click(data)
-        elif ctype == "scan":
-            self._toggle_pota_scan()
-        elif ctype == "log":
-            result = {}
-            self._log_qso_from_map(data, result_dict=result)
-            self._write_map_result(cmd_id, result)
-            self._write_map_state()
-        elif ctype == "set_hide_qrt":
-            self._pota_hide_qrt.set(bool(data.get("enabled", False)))
-            self._apply_pota_filters()
-        elif ctype == "set_autorespot":
-            self._pota_respot_enabled.set(bool(data.get("enabled", False)))
-            self._write_map_state()
-        elif ctype == "set_scan_interval":
-            val = int(data.get("interval", 15))
-            self._pota_scan_interval.set(max(5, min(60, val)))
-            self._write_map_state()
-        elif ctype == "set_filters":
-            if "hide_qrt" in data:
-                self._pota_hide_qrt.set(bool(data["hide_qrt"]))
-                self._apply_pota_filters()
-        elif ctype == "respot":
-            mycall = self.cfg.get("callsign", "").upper()
-            if mycall:
-                def _bg(d=data, c=mycall):
-                    pota_post_spot(
-                        activator=str(d.get("activator", "")),
-                        spotter=c,
-                        reference=str(d.get("reference", "")),
-                        freq_khz=d.get("freq_khz", ""),
-                        mode=str(d.get("mode", "")),
-                    )
-                threading.Thread(target=_bg, daemon=True).start()
 
     # ── Tab 3: POTA Spots ─────────────────────────────────────────────────
     def _build_tab_pota(self, parent):
@@ -2299,7 +2499,6 @@ class POTAHunter(tk.Tk):
         self._pota_mode_cb["values"] = ["All"] + all_modes
 
         self._populate_pota_table(spots)
-        self._write_map_state()
 
     def _on_pota_tree_click(self, event=None):
         if self._pota_scan_active:
@@ -2798,67 +2997,6 @@ class POTAHunter(tk.Tk):
         self._maybe_post_pota_spot(row)
         self._clear_form()
 
-    def _log_qso_from_map(self, data, result_q=None, result_dict=None):
-        def _reply(r):
-            if result_q is not None:
-                result_q.put(r)
-            if result_dict is not None:
-                result_dict.update(r)
-        if not self.adif_path:
-            _reply({"error": "No logbook open"})
-            return
-        call = str(data.get("call", "")).strip().upper()
-        if not call:
-            _reply({"error": "Callsign required"})
-            return
-        now = datetime.datetime.utcnow()
-        if self._flrig_freq_hz is not None:
-            try:
-                freq_mhz = float(self._flrig_freq_hz) / 1_000_000
-            except Exception:
-                freq_mhz = float(self._flrig_freq_hz)
-            band = freq_to_band(freq_mhz)
-            mode = str(self._flrig_mode).upper() if self._flrig_mode else ""
-        else:
-            freq_mhz = None
-            band = ""
-            mode = ""
-        row = {
-            "call":       call,
-            "date":       now.strftime("%Y-%m-%d"),
-            "time_on":    now.strftime("%H%M"),
-            "freq":       freq_mhz,
-            "band":       band,
-            "mode":       mode,
-            "rst_sent":   str(data.get("rst_sent", "")).strip() or "59",
-            "rst_rcvd":   str(data.get("rst_rcvd", "")).strip() or "59",
-            "name":       "",
-            "qth":        "",
-            "gridsquare": str(data.get("gridsquare", "")).strip().upper(),
-            "park_nr":    str(data.get("park_nr", "")).strip(),
-            "comment":    str(data.get("comment", "")).strip(),
-            "notes":      "",
-        }
-        try:
-            self.conn.execute("""
-                INSERT INTO qso (call,date,time_on,freq,band,mode,
-                    rst_sent,rst_rcvd,name,qth,gridsquare,park_nr,comment,notes)
-                VALUES (:call,:date,:time_on,:freq,:band,:mode,
-                    :rst_sent,:rst_rcvd,:name,:qth,:gridsquare,:park_nr,:comment,:notes)
-            """, row)
-            self.conn.commit()
-            mycall = self.cfg.get("callsign", "").upper()
-            with open(self.adif_path, "a", encoding="utf-8") as f:
-                f.write(row_to_adif(row, mycall))
-            self._reload_table()
-            self._refresh_pota_highlights()
-            freq_disp = f"{freq_mhz:.4f} MHz" if freq_mhz else "freq unknown"
-            self._set_status(
-                f"Snipe ✔  {call}  {row['date']} {row['time_on']}z  {freq_disp}  {band}  {mode}")
-            _reply({"ok": True})
-        except Exception as exc:
-            _reply({"error": str(exc)})
-
     def _maybe_post_pota_spot(self, row):
         if not self._pota_respot_enabled.get():
             return
@@ -3118,8 +3256,7 @@ class POTAHunter(tk.Tk):
         self._rebuild_ui()
 
     def _rebuild_ui(self):
-        for attr in ("_flrig_poll_id", "_pota_after_id", "_map_resize_id",
-                     "_map_cmd_poll_id", "_map_state_write_id"):
+        for attr in ("_flrig_poll_id", "_pota_after_id", "_map_resize_id"):
             id_ = getattr(self, attr, None)
             if id_:
                 self.after_cancel(id_)
@@ -3164,11 +3301,7 @@ class POTAHunter(tk.Tk):
         if _qrz_session:
             self._qrz_lbl.config(text="QRZ: ✔", fg=ACC3)
 
-        self._map_cmd_poll_id    = None
-        self._map_state_write_id = None
         self._start_flrig_poll()
-        self._start_map_command_poll()
-        self._start_map_state_write()
 
     # ── Flrig poll ────────────────────────────────────────────────────────
     def _start_flrig_poll(self):
@@ -3291,10 +3424,8 @@ class POTAHunter(tk.Tk):
             self.after_cancel(self._pota_scan_after_id)
         if self._map_resize_id:
             self.after_cancel(self._map_resize_id)
-        if getattr(self, "_map_cmd_poll_id", None):
-            self.after_cancel(self._map_cmd_poll_id)
-        if getattr(self, "_map_state_write_id", None):
-            self.after_cancel(self._map_state_write_id)
+        if self._map_server:
+            threading.Thread(target=self._map_server.shutdown, daemon=True).start()
         if self.conn:
             self.conn.close()
         save_config(self.cfg)
