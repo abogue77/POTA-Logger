@@ -1875,94 +1875,229 @@ class POTAHunter(tk.Tk):
 
     def _start_map_server(self):
         app = self
-        MAP_HTML = (
-            '<!DOCTYPE html><html><head><meta charset="utf-8">'
-            '<title>POTA Hunter — Live Map</title>'
-            '<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>'
-            '<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>'
-            '<style>html,body,#map{height:100%;margin:0;background:#111318;}'
-            '#status{position:absolute;top:8px;right:8px;z-index:9999;'
-            'background:rgba(0,0,0,.6);color:#aaa;font:11px monospace;padding:4px 8px;'
-            'border-radius:4px;pointer-events:none;}'
-            '.beam-anim{animation:beam-flow 0.9s linear infinite;}'
-            '@keyframes beam-flow{to{stroke-dashoffset:-20;}}'
-            '@keyframes spot-flash{0%,100%{opacity:1}50%{opacity:0.1}}'
-            '.spot-flash{animation:spot-flash 1.5s ease-in-out infinite;}</style>'
-            '</head><body><div id="map"></div><div id="status">Loading…</div><script>\n'
-            'var map=L.map("map",{center:[20,0],zoom:2});\n'
-            'L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",'
-            '{attribution:"&copy; OpenStreetMap contributors &copy; CARTO",'
-            'subdomains:"abcd",maxZoom:19}).addTo(map);\n'
-            'var markers=[],beamLine=null;\n'
-            'function clearMarkers(){'
-            '  markers.forEach(function(m){map.removeLayer(m);});markers=[];\n'
-            '  if(beamLine){map.removeLayer(beamLine);beamLine=null;}}\n'
-            'function refreshData(){\n'
-            '  fetch("/data").then(function(r){return r.json();}).then(function(d){\n'
-            '    clearMarkers();\n'
-            '    (d.qsos||[]).forEach(function(q){\n'
-            '      var m=L.circleMarker([q.lat,q.lon],'
-            '{radius:6,color:"#cc44ff",fillColor:"#cc44ff",fillOpacity:0.7,weight:1});\n'
-            '      var pop="<b>"+q.call+"</b>";\n'
-            '      if(q.park)pop+=" ["+q.park+"]";\n'
-            '      if(q.band||q.mode)pop+="<br>"+[q.band,q.mode].filter(Boolean).join(" ");\n'
-            '      if(q.date)pop+="<br>"+q.date+" "+q.time_on+"z";\n'
-            '      m.bindPopup(pop);m.addTo(map);markers.push(m);});\n'
-            '    (d.spots||[]).forEach(function(s){\n'
-            '      var color=s.tuned?"#0077ff":s.worked?"#00bb44":"#ffff00";\n'
-            '      var r=s.tuned?9:7;\n'
-            '      var cls=(!s.tuned&&!s.worked)?"spot-flash":"";\n'
-            '      var m=L.circleMarker([s.lat,s.lon],'
-            '{radius:r,color:color,fillColor:color,fillOpacity:0.85,weight:s.tuned?2:1,className:cls});\n'
-            '      var pop=s.activator+" ["+s.park+"]<br>"+s.freq_khz+" kHz "+s.mode;\n'
-            '      if(s.tuned)pop+="<br><b>&#x25CF; TUNED</b>";\n'
-            '      if(s.worked)pop+="<br><b>Worked</b>";\n'
-            '      m.bindPopup(pop);\n'
-            '      m.on("click",function(e){'
-            'L.DomEvent.stopPropagation(e);'
-            'fetch("/tune",{method:"POST",headers:{"Content-Type":"application/json"},'
-            'body:JSON.stringify({activator:s.activator,park:s.park,'
-            'freq_khz:s.freq_khz,mode:s.mode,tuned:s.tuned})});});\n'
-            '      m.addTo(map);markers.push(m);});\n'
-            '    if(d.my_grid){\n'
-            '      var mg=d.my_grid;\n'
-            '      var star=L.marker([mg.lat,mg.lon],'
-            '{icon:L.divIcon({html:\'<span style="color:#ff2222;font-size:18px;">&#9733;</span>\','
-            'className:"",iconAnchor:[9,9]})});\n'
-            '      star.bindPopup("My grid: "+mg.gs);star.addTo(map);markers.push(star);}\n'
-            '    if(d.my_grid&&d.tuned_spot){\n'
-            '      var gcp=gcPoints(d.my_grid.lat,d.my_grid.lon,'
-            'd.tuned_spot.lat,d.tuned_spot.lon,60);\n'
-            '      beamLine=L.polyline(gcp,'
-            '{color:"#0077ff",weight:2.5,dashArray:"12 8",opacity:0.85,'
-            'className:"beam-anim"});\n'
-            '      beamLine.addTo(map);}\n'
-            '    var now=new Date().toLocaleTimeString();\n'
-            '    document.getElementById("status").textContent='
-            '"Updated "+now+" — "+(d.spots||[]).length+" spots  |  "+(d.qsos||[]).length+" QSOs logged";'
-            '  }).catch(function(e){'
-            '    document.getElementById("status").textContent="Fetch error: "+e;});}\n'
-            'function gcPoints(la1,lo1,la2,lo2,n){\n'
-            '  var R=Math.PI/180;\n'
-            '  var f1=la1*R,l1=lo1*R,f2=la2*R,l2=lo2*R;\n'
-            '  var d=2*Math.asin(Math.sqrt(Math.pow(Math.sin((f2-f1)/2),2)'
-            '+Math.cos(f1)*Math.cos(f2)*Math.pow(Math.sin((l2-l1)/2),2)));\n'
-            '  if(d<1e-6)return[[la1,lo1],[la2,lo2]];\n'
-            '  var pts=[];\n'
-            '  for(var i=0;i<=n;i++){\n'
-            '    var f=i/n,A=Math.sin((1-f)*d)/Math.sin(d),B=Math.sin(f*d)/Math.sin(d);\n'
-            '    var x=A*Math.cos(f1)*Math.cos(l1)+B*Math.cos(f2)*Math.cos(l2);\n'
-            '    var y=A*Math.cos(f1)*Math.sin(l1)+B*Math.cos(f2)*Math.sin(l2);\n'
-            '    var z=A*Math.sin(f1)+B*Math.sin(f2);\n'
-            '    pts.push([Math.atan2(z,Math.sqrt(x*x+y*y))/R,Math.atan2(y,x)/R]);\n'
-            '  }\n'
-            '  return pts;\n'
-            '}\n'
-            'refreshData();\n'
-            'setInterval(refreshData,2000);\n'
-            'map.on("click",function(){fetch("/scan",{method:"POST"});});\n'
-            '</script></body></html>'
-        )
+        MAP_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>POTA Hunter — Live Map</title>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+:root{--red:#ff2020;--red-dim:#8b0000;--amber:#ff9900;--green:#00ff88;--cyan:#00e5ff;--bg:#030609;--panel:#070d12;--border:#1a3040;--text:#c8dde8;--dim:#3a5060;}
+*{margin:0;padding:0;box-sizing:border-box;}
+html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);font-family:'Share Tech Mono',monospace;}
+body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:9000;background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,.07) 2px,rgba(0,0,0,.07) 4px);}
+header{height:52px;display:flex;align-items:center;justify-content:space-between;padding:0 24px;border-bottom:1px solid var(--red);background:linear-gradient(90deg,#0a0002,#0d0008,#0a0002);position:relative;z-index:1000;flex-shrink:0;}
+header::after{content:'';position:absolute;inset:0;pointer-events:none;background:repeating-linear-gradient(90deg,transparent,transparent 60px,rgba(255,20,20,.025) 60px,rgba(255,20,20,.025) 61px);}
+.logo{font-family:'Orbitron',sans-serif;font-weight:900;font-size:1.2rem;color:var(--red);letter-spacing:4px;text-shadow:0 0 20px rgba(255,32,32,.8),0 0 40px rgba(255,32,32,.3);}
+.logo span{color:#fff;}
+.hdr-mid{display:flex;gap:18px;align-items:center;font-size:.63rem;letter-spacing:2px;color:var(--dim);}
+.status-dot{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green);animation:sdpulse 1.5s ease-in-out infinite;display:inline-block;margin-right:5px;}
+@keyframes sdpulse{0%,100%{opacity:1;box-shadow:0 0 8px var(--green)}50%{opacity:.4;box-shadow:0 0 2px var(--green)}}
+#clock{font-family:'Orbitron',sans-serif;font-size:.7rem;color:var(--amber);letter-spacing:2px;}
+.app-body{display:flex;height:calc(100vh - 52px);}
+.panel{width:240px;flex-shrink:0;background:var(--panel);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden;}
+.panel.right{width:260px;border-right:none;border-left:1px solid var(--border);}
+.panel-inner{flex:1;overflow-y:auto;padding:13px;display:flex;flex-direction:column;gap:9px;}
+.panel-title{font-family:'Orbitron',sans-serif;font-size:.57rem;letter-spacing:3px;color:var(--red);text-transform:uppercase;padding-bottom:6px;border-bottom:1px solid var(--red-dim);flex-shrink:0;}
+.card{background:rgba(255,255,255,.02);border:1px solid var(--border);padding:8px 11px;position:relative;flex-shrink:0;}
+.card::before{content:'';position:absolute;top:0;left:0;width:3px;height:100%;background:var(--red);}
+.card-label{font-size:.57rem;letter-spacing:2px;color:var(--dim);text-transform:uppercase;margin-bottom:3px;}
+.card-value{font-family:'Orbitron',sans-serif;font-size:1rem;color:var(--amber);text-shadow:0 0 10px rgba(255,153,0,.5);}
+.card-sub{font-size:.6rem;color:var(--dim);margin-top:2px;}
+.chips{display:flex;flex-wrap:wrap;gap:3px;}
+.chip{border:1px solid;padding:2px 7px;font-size:.56rem;letter-spacing:1px;}
+.chip strong{color:var(--amber);}
+.map-area{flex:1;position:relative;overflow:hidden;}
+#map{width:100%;height:100%;background:#020810;}
+.spot-item{background:rgba(255,255,255,.015);border:1px solid var(--border);padding:7px 10px;cursor:pointer;transition:all .15s;flex-shrink:0;border-left:3px solid var(--dim);}
+.spot-item:hover{background:rgba(0,119,255,.07);box-shadow:0 0 10px rgba(0,119,255,.1);}
+.spot-item.tuned{border-left-color:var(--cyan);background:rgba(0,229,255,.05);}
+.spot-item.tuned:hover{background:rgba(0,229,255,.09);}
+.spot-item.worked{border-left-color:#00bb44;}
+.spot-item.worked:hover{background:rgba(0,187,68,.07);}
+.spot-call{font-family:'Orbitron',sans-serif;font-size:.72rem;color:var(--cyan);text-shadow:0 0 6px rgba(0,229,255,.4);display:flex;align-items:center;justify-content:space-between;}
+.spot-badge{font-size:.52rem;letter-spacing:1px;padding:1px 5px;border:1px solid currentColor;}
+.spot-badge.tuned{color:var(--cyan);}
+.spot-badge.worked{color:#00bb44;}
+.spot-meta{font-size:.58rem;color:var(--dim);margin-top:3px;display:flex;gap:7px;flex-wrap:wrap;}
+.spot-park{color:var(--amber);}
+.no-spots{text-align:center;padding:28px 10px;color:var(--dim);font-size:.6rem;letter-spacing:2px;line-height:2;}
+.beam-anim{animation:beam-flow 0.9s linear infinite;}
+@keyframes beam-flow{to{stroke-dashoffset:-20;}}
+@keyframes spot-flash{0%,100%{opacity:1}50%{opacity:0.1}}
+.spot-flash{animation:spot-flash 1.5s ease-in-out infinite;}
+::-webkit-scrollbar{width:3px;}
+::-webkit-scrollbar-thumb{background:var(--red-dim);}
+#scan-btn{cursor:pointer;font-family:'Orbitron',sans-serif;font-size:.6rem;letter-spacing:2px;padding:4px 12px;border:1px solid currentColor;transition:all .2s;user-select:none;}
+#scan-btn.active{color:var(--green);border-color:var(--green);text-shadow:0 0 8px var(--green);}
+#scan-btn.paused{color:var(--red);border-color:var(--red-dim);}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">// <span>POTA Hunter</span></div>
+  <div class="hdr-mid">
+    <span><span class="status-dot"></span>POTA HUNTER</span>
+    <span id="clock">--:--:-- ZULU</span>
+    <span id="mycall" style="color:var(--cyan);font-family:'Orbitron',sans-serif;font-size:.7rem;letter-spacing:3px;"></span>
+  </div>
+  <div id="scan-btn" class="paused">⏸ SCAN PAUSED</div>
+</header>
+<div class="app-body">
+  <div class="panel">
+    <div class="panel-inner">
+      <div class="panel-title">◈ POTA STATUS</div>
+      <div class="card">
+        <div class="card-label">Active Spots</div>
+        <div class="card-value" id="stat-spots">—</div>
+        <div class="card-sub">Live POTA activations</div>
+      </div>
+      <div class="card">
+        <div class="card-label">QSOs Logged</div>
+        <div class="card-value" id="stat-qsos">—</div>
+        <div class="card-sub">This session</div>
+      </div>
+      <div class="panel-title" style="margin-top:4px">◈ BANDS</div>
+      <div class="chips" id="stat-bands">
+        <div style="color:var(--dim);font-size:.6rem;letter-spacing:2px">NO SPOTS</div>
+      </div>
+    </div>
+  </div>
+  <div class="map-area">
+    <div id="map"></div>
+  </div>
+  <div class="panel right">
+    <div class="panel-inner">
+      <div class="panel-title">◈ ACTIVE SPOTS</div>
+      <div id="spots-list">
+        <div class="no-spots">AWAITING SPOTS...<br><br>Enable POTA scan to<br>populate this panel</div>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+var map=L.map('map',{center:[20,0],zoom:2});
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{
+  attribution:'&copy; OpenStreetMap contributors &copy; CARTO',
+  subdomains:'abcd',maxZoom:19}).addTo(map);
+var markers=[],beamLine=null;
+var BAND_COLORS={'160m':'#ff4444','80m':'#ff8800','60m':'#ffcc00','40m':'#aaff00',
+  '30m':'#00ffaa','20m':'#00e5ff','17m':'#0088ff','15m':'#8844ff',
+  '12m':'#ff44cc','10m':'#ff2288','6m':'#ff0055','2m':'#ff6688','other':'#aaaaaa'};
+function freqToBand(k){
+  if(!k)return 'other';
+  if(k<2000)return '160m';if(k<4000)return '80m';if(k<5500)return '60m';
+  if(k<8000)return '40m';if(k<11000)return '30m';if(k<15500)return '20m';
+  if(k<18500)return '17m';if(k<22000)return '15m';if(k<25000)return '12m';
+  if(k<30000)return '10m';if(k<54000)return '6m';if(k<148000)return '2m';
+  return 'other';}
+function clearMarkers(){
+  markers.forEach(function(m){map.removeLayer(m);});markers=[];
+  if(beamLine){map.removeLayer(beamLine);beamLine=null;}}
+function updateStatsPanel(d){
+  var spots=d.spots||[],qsos=d.qsos||[];
+  document.getElementById('stat-spots').textContent=spots.length||'—';
+  document.getElementById('stat-qsos').textContent=qsos.length||'—';
+  var bc={};
+  spots.forEach(function(s){var b=freqToBand(s.freq_khz);bc[b]=(bc[b]||0)+1;});
+  var keys=Object.keys(bc),bandsEl=document.getElementById('stat-bands');
+  if(!keys.length){bandsEl.innerHTML='<div style="color:var(--dim);font-size:.6rem;letter-spacing:2px">NO SPOTS</div>';return;}
+  bandsEl.innerHTML=keys.sort().map(function(b){
+    var c=BAND_COLORS[b]||'#aaa';
+    return '<div class="chip" style="border-color:'+c+';color:'+c+'"><strong>'+bc[b]+'</strong> '+b+'</div>';
+  }).join('');}
+function updateSpotsPanel(d){
+  var spots=(d.spots||[]).slice();
+  spots.sort(function(a,b){return(a.spot_time||'').localeCompare(b.spot_time||'');});
+  var el=document.getElementById('spots-list');
+  if(!spots.length){el.innerHTML='<div class="no-spots">NO ACTIVE SPOTS<br><br>Enable POTA scan to<br>populate this panel</div>';return;}
+  el.innerHTML=spots.map(function(s,i){
+    var cls=s.tuned?'tuned':s.worked?'worked':'';
+    var badge=s.tuned?'<span class="spot-badge tuned">&#9679; TUNED</span>'
+      :s.worked?'<span class="spot-badge worked">&#10003; WORKED</span>':'';
+    var mhz=s.freq_khz?(s.freq_khz/1000).toFixed(3)+' MHz':'?';
+    var band=freqToBand(s.freq_khz),bc=BAND_COLORS[band]||'#aaa';
+    return '<div class="spot-item '+cls+'" data-i="'+i+'">'
+      +'<div class="spot-call"><span>'+s.activator+'</span>'+badge+'</div>'
+      +'<div class="spot-meta"><span class="spot-park">'+(s.park||'?')+'</span>'
+      +'<span style="color:'+bc+'">'+band+'</span>'
+      +'<span>'+mhz+'</span><span>'+(s.mode||'')+'</span></div></div>';
+  }).join('');
+  el.querySelectorAll('.spot-item').forEach(function(item){
+    var i=parseInt(item.dataset.i);
+    item.addEventListener('click',function(){
+      var s=spots[i];
+      fetch('/tune',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({activator:s.activator,park:s.park,freq_khz:s.freq_khz,mode:s.mode,tuned:s.tuned})});
+    });});}
+function refreshData(){
+  fetch('/data').then(function(r){return r.json();}).then(function(d){
+    clearMarkers();
+    (d.qsos||[]).forEach(function(q){
+      var m=L.circleMarker([q.lat,q.lon],{radius:6,color:'#cc44ff',fillColor:'#cc44ff',fillOpacity:0.7,weight:1});
+      var pop='<b>'+q.call+'</b>';
+      if(q.park)pop+=' ['+q.park+']';
+      if(q.band||q.mode)pop+='<br>'+[q.band,q.mode].filter(Boolean).join(' ');
+      if(q.date)pop+='<br>'+q.date+' '+q.time_on+'z';
+      m.bindPopup(pop);m.addTo(map);markers.push(m);});
+    (d.spots||[]).forEach(function(s){
+      var color=s.tuned?'#0077ff':s.worked?'#00bb44':'#ffff00';
+      var r=s.tuned?9:7;
+      var cls=(!s.tuned&&!s.worked)?'spot-flash':'';
+      var m=L.circleMarker([s.lat,s.lon],{radius:r,color:color,fillColor:color,fillOpacity:0.85,weight:s.tuned?2:1,className:cls});
+      var pop=s.activator+' ['+s.park+']<br>'+s.freq_khz+' kHz '+s.mode;
+      if(s.tuned)pop+='<br><b>&#x25CF; TUNED</b>';
+      if(s.worked)pop+='<br><b>Worked</b>';
+      m.bindPopup(pop);
+      m.on('click',function(e){
+        L.DomEvent.stopPropagation(e);
+        fetch('/tune',{method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({activator:s.activator,park:s.park,freq_khz:s.freq_khz,mode:s.mode,tuned:s.tuned})});});
+      m.addTo(map);markers.push(m);});
+    if(d.my_grid){
+      var mg=d.my_grid;
+      var star=L.marker([mg.lat,mg.lon],{icon:L.divIcon({
+        html:'<span style="color:#ff2222;font-size:18px;">&#9733;</span>',
+        className:'',iconAnchor:[9,9]})});
+      star.bindPopup('My grid: '+mg.gs);star.addTo(map);markers.push(star);}
+    if(d.my_grid&&d.tuned_spot){
+      var gcp=gcPoints(d.my_grid.lat,d.my_grid.lon,d.tuned_spot.lat,d.tuned_spot.lon,60);
+      beamLine=L.polyline(gcp,{color:'#0077ff',weight:2.5,dashArray:'12 8',opacity:0.85,className:'beam-anim'});
+      beamLine.addTo(map);}
+    updateStatsPanel(d);
+    updateSpotsPanel(d);
+    var sb=document.getElementById('scan-btn');
+    if(d.scanning){sb.className='active';sb.textContent='▶ SCANNING';}
+    else{sb.className='paused';sb.textContent='⏸ SCAN PAUSED';}
+    if(d.callsign){document.getElementById('mycall').textContent=d.callsign;}
+  }).catch(function(e){console.error('Fetch error:',e);});}
+function gcPoints(la1,lo1,la2,lo2,n){
+  var R=Math.PI/180;
+  var f1=la1*R,l1=lo1*R,f2=la2*R,l2=lo2*R;
+  var d=2*Math.asin(Math.sqrt(Math.pow(Math.sin((f2-f1)/2),2)+Math.cos(f1)*Math.cos(f2)*Math.pow(Math.sin((l2-l1)/2),2)));
+  if(d<1e-6)return[[la1,lo1],[la2,lo2]];
+  var pts=[];
+  for(var i=0;i<=n;i++){
+    var f=i/n,A=Math.sin((1-f)*d)/Math.sin(d),B=Math.sin(f*d)/Math.sin(d);
+    var x=A*Math.cos(f1)*Math.cos(l1)+B*Math.cos(f2)*Math.cos(l2);
+    var y=A*Math.cos(f1)*Math.sin(l1)+B*Math.cos(f2)*Math.sin(l2);
+    var z=A*Math.sin(f1)+B*Math.sin(f2);
+    pts.push([Math.atan2(z,Math.sqrt(x*x+y*y))/R,Math.atan2(y,x)/R]);}
+  return pts;}
+function updateClock(){
+  var n=new Date();
+  document.getElementById('clock').textContent=
+    ('0'+n.getUTCHours()).slice(-2)+':'+('0'+n.getUTCMinutes()).slice(-2)+':'+('0'+n.getUTCSeconds()).slice(-2)+' ZULU';}
+setInterval(updateClock,1000);updateClock();
+refreshData();
+setInterval(refreshData,2000);
+map.on('click',function(){fetch('/scan',{method:'POST'});});
+document.getElementById('scan-btn').addEventListener('click',function(e){e.stopPropagation();fetch('/scan',{method:'POST'});});
+</script>
+</body>
+</html>"""
 
         class _Handler(http.server.BaseHTTPRequestHandler):
             def _send_json(self, obj, status=200):
@@ -2075,6 +2210,7 @@ class POTAHunter(tk.Tk):
                             "freq_khz": freq_khz, "mode": mode,
                             "tuned": tuned, "worked": worked,
                             "lat": lat, "lon": lon,
+                            "spot_time": str(s.get("spotTime", s.get("timestamp", ""))),
                         })
                     my_grid_data = None
                     tuned_spot = None
@@ -2144,6 +2280,8 @@ class POTAHunter(tk.Tk):
                         "qsos": qsos_out,
                         "my_grid": my_grid_data,
                         "tuned_spot": tuned_spot,
+                        "scanning": app._pota_scan_active,
+                        "callsign": app.cfg.get("callsign", ""),
                     })
                 except Exception as exc:
                     self._send_json({"error": str(exc)}, status=500)
