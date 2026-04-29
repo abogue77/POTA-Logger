@@ -2022,15 +2022,12 @@ function applyRadarLayer(host,path){
   if(radarLayer){radarLayer.setUrl(url);}
   else{radarLayer=L.tileLayer(url,{opacity:RADAR_OPACITY,attribution:'Weather: <a href="https://rainviewer.com" target="_blank">RainViewer</a>',maxZoom:19,zIndex:5});radarLayer.addTo(map);}}
 function fetchLatestRadar(cb){
-  var ctrl=new AbortController(),timer=setTimeout(function(){ctrl.abort();},8000);
-  fetch('https://api.rainviewer.com/public/weather-maps.json',{signal:ctrl.signal})
-    .then(function(r){clearTimeout(timer);if(!r.ok)throw new Error('HTTP '+r.status);return r.json();})
+  fetch('/radar')
+    .then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json();})
     .then(function(data){
-      var host=data.host||'https://tilecache.rainviewer.com';
-      var past=(data.radar&&data.radar.past)?data.radar.past:[];
-      var latest=past[past.length-1];
-      if(latest&&latest.path){cb(null,host,latest.path);}else{cb('No radar data',null,null);}
-    }).catch(function(e){clearTimeout(timer);cb(String(e),null,null);});}
+      if(data.error){cb(data.error,null,null);}
+      else{cb(null,data.host,data.path);}
+    }).catch(function(e){cb(String(e),null,null);});}
 function refreshRadar(){
   fetchLatestRadar(function(err,host,path){
     if(err){console.warn('[radar]',err);return;}
@@ -2220,6 +2217,8 @@ document.getElementById('radar-btn').addEventListener('click',function(e){e.stop
                     self._handle_data()
                 elif self.path == '/debug':
                     self._handle_debug()
+                elif self.path == '/radar':
+                    self._handle_radar()
                 else:
                     body = MAP_HTML.encode()
                     self.send_response(200)
@@ -2266,6 +2265,23 @@ document.getElementById('radar-btn').addEventListener('click',function(e){e.stop
                     "db_error": db_error,
                     "my_grid": app.cfg.get("gridsquare"),
                 })
+
+            def _handle_radar(self):
+                try:
+                    req = urllib.request.Request(
+                        'https://api.rainviewer.com/public/weather-maps.json',
+                        headers={'User-Agent': 'Mozilla/5.0'})
+                    with urllib.request.urlopen(req, timeout=8) as resp:
+                        data = json.loads(resp.read().decode())
+                    host = data.get('host', 'https://tilecache.rainviewer.com')
+                    past = (data.get('radar') or {}).get('past') or []
+                    if past:
+                        latest = past[-1]
+                        self._send_json({'host': host, 'path': latest['path']})
+                    else:
+                        self._send_json({'error': 'no radar frames'}, 500)
+                except Exception as e:
+                    self._send_json({'error': str(e)}, 500)
 
             def _handle_data(self):
                 try:
