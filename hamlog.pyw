@@ -1105,6 +1105,8 @@ class POTAHunter(tk.Tk):
         self._map_pan_x         = 0.0
         self._map_pan_y         = 0.0
         self._map_drag_start    = None
+        self._map_click_origin  = None
+        self._map_spot_data     = {}
         self._map_flash_state   = False
         self._map_flash_id      = None
         self._map_flash_grids   = set()
@@ -1483,6 +1485,7 @@ class POTAHunter(tk.Tk):
         canvas.delete("mymarker")
         self._map_markers = {}
         self._map_marker_items = {}
+        self._map_spot_data = {}
 
         def mpx(lon, lat):
             x = (lon + 180) / 360 * W * self._map_zoom + self._map_pan_x
@@ -1510,6 +1513,17 @@ class POTAHunter(tk.Tk):
                     ref_to_grid = {r[0]: (r[1] or "")[:4] for r in park_rows if r[1]}
                 except Exception:
                     ref_to_grid = {}
+
+                for s in self._pota_spots_filtered:
+                    ref = s.get("reference", s.get("parkReference", ""))
+                    gs  = ref_to_grid.get(ref, "")
+                    if len(gs) < 4:
+                        continue
+                    _slat, _slon = grid_to_latlon(gs)
+                    if _slat is None:
+                        continue
+                    _sx, _sy = mpx(_slon, _slat)
+                    self._map_spot_data.setdefault((round(_sx), round(_sy)), []).append(s)
 
                 if time.monotonic() < self._tune_suppress_until and self._pota_clicked_hz:
                     vfo_hz = self._pota_clicked_hz
@@ -1694,7 +1708,8 @@ class POTAHunter(tk.Tk):
         self._full_map_redraw()
 
     def _on_map_drag_start(self, event):
-        self._map_drag_start = (event.x, event.y)
+        self._map_drag_start   = (event.x, event.y)
+        self._map_click_origin = (event.x, event.y)
 
     def _on_map_drag(self, event):
         if self._map_drag_start is None:
@@ -1707,7 +1722,53 @@ class POTAHunter(tk.Tk):
         self._full_map_redraw()
 
     def _on_map_drag_end(self, event):
-        self._map_drag_start = None
+        origin = self._map_click_origin
+        self._map_drag_start   = None
+        self._map_click_origin = None
+        if origin and abs(event.x - origin[0]) < 6 and abs(event.y - origin[1]) < 6:
+            self._on_map_canvas_click(event)
+
+    def _on_map_canvas_click(self, event):
+        cx, cy = event.x, event.y
+        best_key, best_dist = None, 18
+        for (mx, my) in self._map_spot_data:
+            d = ((cx - mx) ** 2 + (cy - my) ** 2) ** 0.5
+            if d < best_dist:
+                best_dist = d
+                best_key = (mx, my)
+        if best_key is None:
+            self._toggle_pota_scan()
+            return
+        spots = self._map_spot_data[best_key]
+        if not spots:
+            return
+        if time.monotonic() < self._tune_suppress_until and self._pota_clicked_hz:
+            vfo_hz = self._pota_clicked_hz
+        else:
+            vfo_hz = self._flrig_freq_hz
+        try:
+            worked = {r[0] for r in self.conn.execute(
+                "SELECT DISTINCT UPPER(TRIM(call)) FROM qso").fetchall() if r[0]}
+        except Exception:
+            worked = set()
+        chosen = next(
+            (s for s in spots
+             if str(s.get("activator", s.get("activatorCallsign", ""))).upper() not in worked),
+            spots[0]
+        )
+        try:
+            freq_khz = float(chosen.get("frequency", chosen.get("freq", 0)))
+            freq_hz  = int(freq_khz * 1_000)
+        except (ValueError, TypeError):
+            return
+        already_tuned = vfo_hz is not None and freq_hz == int(vfo_hz)
+        self._on_map_station_click({
+            "activator": chosen.get("activator", chosen.get("activatorCallsign", "")),
+            "park":      chosen.get("reference", chosen.get("parkReference", "")),
+            "freq_khz":  freq_khz,
+            "mode":      chosen.get("mode", ""),
+            "tuned":     already_tuned,
+        })
 
     # ── Map animations ────────────────────────────────────────────────────
 
@@ -1856,7 +1917,13 @@ class POTAHunter(tk.Tk):
             '      var pop=s.activator+" ["+s.park+"]<br>"+s.freq_khz+" kHz "+s.mode;\n'
             '      if(s.tuned)pop+="<br><b>&#x25CF; TUNED</b>";\n'
             '      if(s.worked)pop+="<br><b>Worked</b>";\n'
-            '      m.bindPopup(pop);m.addTo(map);markers.push(m);});\n'
+            '      m.bindPopup(pop);\n'
+            '      m.on("click",function(e){'
+            'L.DomEvent.stopPropagation(e);'
+            'fetch("/tune",{method:"POST",headers:{"Content-Type":"application/json"},'
+            'body:JSON.stringify({activator:s.activator,park:s.park,'
+            'freq_khz:s.freq_khz,mode:s.mode,tuned:s.tuned})});});\n'
+            '      m.addTo(map);markers.push(m);});\n'
             '    if(d.my_grid){\n'
             '      var mg=d.my_grid;\n'
             '      var star=L.marker([mg.lat,mg.lon],'
@@ -1893,6 +1960,7 @@ class POTAHunter(tk.Tk):
             '}\n'
             'refreshData();\n'
             'setInterval(refreshData,2000);\n'
+            'map.on("click",function(){fetch("/scan",{method:"POST"});});\n'
             '</script></body></html>'
         )
 
@@ -2079,6 +2147,22 @@ class POTAHunter(tk.Tk):
                     })
                 except Exception as exc:
                     self._send_json({"error": str(exc)}, status=500)
+
+            def do_POST(self):
+                if self.path == '/tune':
+                    try:
+                        length = int(self.headers.get('Content-Length', 0))
+                        data = json.loads(self.rfile.read(length))
+                    except Exception:
+                        self._send_json({"error": "bad json"}, status=400)
+                        return
+                    app.after(0, lambda d=data: app._on_map_station_click(d))
+                    self._send_json({"ok": True})
+                elif self.path == '/scan':
+                    app.after(0, app._toggle_pota_scan)
+                    self._send_json({"ok": True})
+                else:
+                    self._send_json({"error": "not found"}, status=404)
 
             def log_message(self, fmt, *args):
                 pass  # suppress access log noise
@@ -2355,6 +2439,47 @@ class POTAHunter(tk.Tk):
                 msg = f"Tune failed: {result}"
                 fg  = WARN
             self.after(0, lambda: self._pota_status_lbl.config(text=msg, fg=fg))
+
+        threading.Thread(target=_tune, daemon=True).start()
+
+    def _on_map_station_click(self, data):
+        if self._pota_scan_active:
+            self._stop_pota_scan()
+        if data.get("tuned"):
+            return
+        try:
+            freq_khz = float(data.get("freq_khz", 0))
+            freq_hz  = int(freq_khz * 1_000)
+        except (ValueError, TypeError):
+            return
+        activator = str(data.get("activator", "")).strip().upper()
+        park      = str(data.get("park", "")).strip()
+        for iid in self._pota_tree.get_children():
+            vals = self._pota_tree.item(iid, "values")
+            if (str(vals[0]).strip().upper() == activator and
+                    str(vals[1]).strip() == park):
+                self._pota_tree.selection_set(iid)
+                self._pota_tree.see(iid)
+                self._on_pota_spot_select()
+                return
+        freq_mhz_disp = f"{freq_khz / 1000:.4f}"
+        self._pota_clicked_hz     = freq_hz
+        self._tune_suppress_until = time.monotonic() + 4.0
+        self._refresh_pota_highlights()
+        host = self.cfg["flrig_host"]
+        port = self.cfg["flrig_port"]
+        self._pota_status_lbl.config(text=f"Tuning to {freq_mhz_disp} MHz…", fg=FG2)
+
+        def _tune():
+            result = flrig_set_freq(host, port, freq_hz)
+            if result is True:
+                self._tune_suppress_until = time.monotonic() + 3.0
+                self.after(0, lambda: self._update_vfo_display(freq_hz, self._flrig_mode, force=True))
+                self.after(0, lambda: self._pota_status_lbl.config(
+                    text=f"Tuned → {freq_mhz_disp} MHz", fg=ACC3))
+            else:
+                self.after(0, lambda: self._pota_status_lbl.config(
+                    text=f"Tune failed: {result}", fg=WARN))
 
         threading.Thread(target=_tune, daemon=True).start()
 
