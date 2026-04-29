@@ -1892,10 +1892,10 @@ header{height:52px;display:flex;align-items:center;justify-content:space-between
 header::after{content:'';position:absolute;inset:0;pointer-events:none;background:repeating-linear-gradient(90deg,transparent,transparent 60px,rgba(255,20,20,.025) 60px,rgba(255,20,20,.025) 61px);}
 .logo{font-family:'Orbitron',sans-serif;font-weight:900;font-size:1.2rem;color:var(--red);letter-spacing:4px;text-shadow:0 0 20px rgba(255,32,32,.8),0 0 40px rgba(255,32,32,.3);}
 .logo span{color:#fff;}
-.hdr-mid{display:flex;gap:32px;align-items:center;font-size:.63rem;letter-spacing:2px;color:var(--dim);position:absolute;left:50%;transform:translateX(-50%);}
+.hdr-mid{display:flex;gap:32px;align-items:center;font-size:.87rem;letter-spacing:2px;color:var(--dim);position:absolute;left:50%;transform:translateX(-50%);}
 .status-dot{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green);animation:sdpulse 1.5s ease-in-out infinite;display:inline-block;margin-right:5px;}
 @keyframes sdpulse{0%,100%{opacity:1;box-shadow:0 0 8px var(--green)}50%{opacity:.4;box-shadow:0 0 2px var(--green)}}
-#clock{font-family:'Orbitron',sans-serif;font-size:.7rem;color:var(--amber);letter-spacing:2px;}
+#clock{font-family:'Orbitron',sans-serif;font-size:.96rem;color:var(--amber);letter-spacing:2px;}
 .app-body{display:flex;height:calc(100vh - 52px);}
 .panel{width:240px;flex-shrink:0;background:var(--panel);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden;}
 .panel.right{width:260px;border-right:none;border-left:1px solid var(--border);}
@@ -1909,6 +1909,15 @@ header::after{content:'';position:absolute;inset:0;pointer-events:none;backgroun
 .chips{display:flex;flex-wrap:wrap;gap:3px;}
 .chip{border:1px solid;padding:2px 7px;font-size:.56rem;letter-spacing:1px;}
 .chip strong{color:var(--amber);}
+.filter-chip{border:1px solid var(--red);padding:2px 7px;font-size:.56rem;letter-spacing:1px;cursor:pointer;transition:all .15s;color:var(--red);user-select:none;}
+.filter-chip:hover{opacity:.8;}
+.filter-chip.active{color:var(--green);border-color:var(--green);text-shadow:0 0 6px rgba(0,255,136,.4);}
+#hide-qrt-btn{width:100%;padding:4px 0;font-family:'Orbitron',sans-serif;font-size:.52rem;letter-spacing:2px;background:transparent;border:1px solid var(--red);color:var(--red);cursor:pointer;transition:all .2s;margin-bottom:4px;}
+#hide-qrt-btn:hover{background:rgba(255,32,32,.07);}
+#hide-qrt-btn.active{border-color:var(--green);color:var(--green);text-shadow:0 0 6px rgba(0,255,136,.4);}
+#respot-btn{width:100%;padding:6px 0;font-family:'Orbitron',sans-serif;font-size:.52rem;letter-spacing:2px;background:transparent;border:1px solid var(--amber);color:var(--amber);cursor:pointer;text-shadow:0 0 6px rgba(255,153,0,.3);transition:all .2s;margin-top:4px;}
+#respot-btn:hover{background:rgba(255,153,0,.08);box-shadow:0 0 10px rgba(255,153,0,.2);}
+#respot-status{font-size:.52rem;color:var(--green);display:block;text-align:center;margin-top:2px;min-height:.8rem;}
 .map-area{flex:1;position:relative;overflow:hidden;}
 #map{width:100%;height:100%;background:#020810;}
 .spot-item{background:rgba(255,255,255,.015);border:1px solid var(--border);padding:7px 10px;cursor:pointer;transition:all .15s;flex-shrink:0;border-left:3px solid var(--dim);}
@@ -1951,7 +1960,7 @@ header::after{content:'';position:absolute;inset:0;pointer-events:none;backgroun
   <div class="hdr-mid">
     <span><span class="status-dot"></span>POTA HUNTER</span>
     <span id="clock">--:--:-- ZULU</span>
-    <span id="mycall" style="color:var(--cyan);font-family:'Orbitron',sans-serif;font-size:.7rem;letter-spacing:3px;"></span>
+    <span id="mycall" style="color:var(--cyan);font-family:'Orbitron',sans-serif;font-size:.96rem;letter-spacing:3px;"></span>
   </div>
 </header>
 <div class="app-body">
@@ -1972,8 +1981,21 @@ header::after{content:'';position:absolute;inset:0;pointer-events:none;backgroun
       <div class="chips" id="stat-bands">
         <div style="color:var(--dim);font-size:.6rem;letter-spacing:2px">NO SPOTS</div>
       </div>
+      <div class="panel-title" style="margin-top:6px">◈ MODE</div>
+      <div class="chips" id="stat-modes">
+        <div style="color:var(--dim);font-size:.6rem;letter-spacing:2px">NO SPOTS</div>
+      </div>
+      <div class="panel-title" style="margin-top:6px">◈ ITU REGIONS</div>
+      <div class="chips" id="stat-itu">
+        <div class="filter-chip" data-itu="1">R1</div>
+        <div class="filter-chip" data-itu="2">R2</div>
+        <div class="filter-chip" data-itu="3">R3</div>
+      </div>
       <div class="panel-title" style="margin-top:8px">◈ LOG</div>
+      <button id="hide-qrt-btn">⊘ HIDE QRT</button>
       <button id="snipe-btn">⊕ SNIPE QSO</button>
+      <button id="respot-btn">⟳ REPORT SPOT</button>
+      <span id="respot-status"></span>
     </div>
   </div>
   <div class="map-area">
@@ -2026,23 +2048,102 @@ function freqToBand(k){
 function clearMarkers(){
   markers.forEach(function(m){map.removeLayer(m);});markers=[];
   if(beamLine){map.removeLayer(beamLine);beamLine=null;}}
-function updateStatsPanel(d){
-  var spots=d.spots||[],qsos=d.qsos||[];
-  document.getElementById('stat-spots').textContent=spots.length||'—';
-  document.getElementById('stat-qsos').textContent=qsos.length||'—';
-  var bc={};
-  spots.forEach(function(s){var b=freqToBand(s.freq_khz);bc[b]=(bc[b]||0)+1;});
-  var keys=Object.keys(bc),bandsEl=document.getElementById('stat-bands');
-  if(!keys.length){bandsEl.innerHTML='<div style="color:var(--dim);font-size:.6rem;letter-spacing:2px">NO SPOTS</div>';return;}
-  bandsEl.innerHTML=keys.sort().map(function(b){
-    var c=BAND_COLORS[b]||'#aaa';
-    return '<div class="chip" style="border-color:'+c+';color:'+c+'"><strong>'+bc[b]+'</strong> '+b+'</div>';
-  }).join('');}
-function updateSpotsPanel(d){
-  var spots=(d.spots||[]).slice();
+var lastSpotData=null;
+var filterBands=new Set();
+var filterModes=new Set();
+var filterItu=new Set();
+var hideQrt=false;
+
+function latLonToItuRegion(lat,lon){
+  return lon<=-30?2:lon<=60?1:3;}
+
+function applyFilters(spots){
+  return (spots||[]).filter(function(s){
+    if(hideQrt&&s.comment&&s.comment.indexOf('qrt')!==-1)return false;
+    if(filterBands.size>0&&!filterBands.has(freqToBand(s.freq_khz)))return false;
+    if(filterModes.size>0&&!filterModes.has((s.mode||'').toUpperCase()))return false;
+    if(filterItu.size>0&&!filterItu.has(latLonToItuRegion(s.lat,s.lon)))return false;
+    return true;});}
+
+function buildFilterChips(containerId,items,activeSet,colorFn,labelFn){
+  var el=document.getElementById(containerId);
+  if(!items.length){el.innerHTML='<div style="color:var(--dim);font-size:.6rem;letter-spacing:2px">NO SPOTS</div>';return;}
+  el.innerHTML=items.map(function(v){
+    var col=colorFn?colorFn(v):'var(--red)';
+    var lbl=labelFn?labelFn(v):v;
+    var act=activeSet.has(v)?'active':'';
+    var sty=act?'':' style="border-color:'+col+';color:'+col+'"';
+    return '<div class="filter-chip '+act+'"'+sty+' data-val="'+v+'">'+lbl+'</div>';
+  }).join('');
+  el.querySelectorAll('.filter-chip').forEach(function(chip){
+    chip.addEventListener('click',function(){
+      var v=chip.dataset.val;
+      if(typeof v==='string'&&!isNaN(Number(v)))v=Number(v);
+      if(activeSet.has(v))activeSet.delete(v);else activeSet.add(v);
+      if(lastSpotData)renderSpotsAndMarkers(lastSpotData);});}); }
+
+function updateFilterPanels(d){
+  var spots=d.spots||[];
+  var allBands=[],seenB={};
+  spots.forEach(function(s){var b=freqToBand(s.freq_khz);if(!seenB[b]){seenB[b]=1;allBands.push(b);}});
+  allBands.sort();
+  buildFilterChips('stat-bands',allBands,filterBands,function(b){return BAND_COLORS[b]||'#aaa';},null);
+
+  var allModes=[],seenM={};
+  spots.forEach(function(s){var m=(s.mode||'').toUpperCase();if(m&&!seenM[m]){seenM[m]=1;allModes.push(m);}});
+  allModes.sort();
+  buildFilterChips('stat-modes',allModes,filterModes,function(){return 'var(--red)';},null);
+
+  var ituEl=document.getElementById('stat-itu');
+  ituEl.querySelectorAll('.filter-chip').forEach(function(chip){
+    var v=Number(chip.dataset.itu);
+    chip.className='filter-chip'+(filterItu.has(v)?' active':'');
+  });}
+
+function renderSpotsAndMarkers(d){
+  var visible=applyFilters(d.spots);
+  clearMarkers();
+  (d.qsos||[]).forEach(function(q){
+    var m=L.circleMarker([q.lat,q.lon],{radius:6,color:'#cc44ff',fillColor:'#cc44ff',fillOpacity:0.7,weight:1});
+    var pop='<b>'+q.call+'</b>';
+    if(q.park)pop+=' ['+q.park+']';
+    if(q.band||q.mode)pop+='<br>'+[q.band,q.mode].filter(Boolean).join(' ');
+    if(q.date)pop+='<br>'+q.date+' '+q.time_on+'z';
+    m.bindPopup(pop);m.addTo(map);markers.push(m);});
+  visible.forEach(function(s){
+    var color=s.tuned?'#0077ff':s.worked?'#00bb44':'#ffff00';
+    var r=s.tuned?9:7;
+    var cls=(!s.tuned&&!s.worked)?'spot-flash':'';
+    var m=L.circleMarker([s.lat,s.lon],{radius:r,color:color,fillColor:color,fillOpacity:0.85,weight:s.tuned?2:1,className:cls});
+    var pop=s.activator+' ['+s.park+']<br>'+s.freq_khz+' kHz '+s.mode;
+    if(s.tuned)pop+='<br><b>&#x25CF; TUNED</b>';
+    if(s.worked)pop+='<br><b>Worked</b>';
+    m.bindPopup(pop);
+    m.on('click',function(e){
+      L.DomEvent.stopPropagation(e);
+      fetch('/tune',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({activator:s.activator,park:s.park,freq_khz:s.freq_khz,mode:s.mode,tuned:s.tuned})});});
+    m.addTo(map);markers.push(m);});
+  if(d.my_grid){
+    var mg=d.my_grid;
+    var star=L.marker([mg.lat,mg.lon],{icon:L.divIcon({
+      html:'<span style="color:#ff2222;font-size:18px;">&#9733;</span>',
+      className:'',iconAnchor:[9,9]})});
+    star.bindPopup('My grid: '+mg.gs);star.addTo(map);markers.push(star);}
+  if(d.my_grid&&d.tuned_spot){
+    var gcp=gcPoints(d.my_grid.lat,d.my_grid.lon,d.tuned_spot.lat,d.tuned_spot.lon,60);
+    beamLine=L.polyline(gcp,{color:'#0077ff',weight:2.5,dashArray:'12 8',opacity:0.85,className:'beam-anim'});
+    beamLine.addTo(map);}
+  var total=(d.spots||[]).length,shown=visible.length;
+  document.getElementById('stat-spots').textContent=shown===total?total:(shown+'/'+total)||'—';
+  document.getElementById('stat-qsos').textContent=(d.qsos||[]).length||'—';
+  updateSpotsPanel(visible,d.spots);}
+
+function updateSpotsPanel(visible,allSpots){
+  var spots=visible.slice();
   spots.sort(function(a,b){return(a.spot_time||'').localeCompare(b.spot_time||'');});
   var el=document.getElementById('spots-list');
-  if(!spots.length){el.innerHTML='<div class="no-spots">NO ACTIVE SPOTS<br><br>Enable POTA scan to<br>populate this panel</div>';return;}
+  if(!spots.length){el.innerHTML='<div class="no-spots">'+(allSpots&&allSpots.length?'NO SPOTS MATCH FILTERS':'NO ACTIVE SPOTS<br><br>Enable POTA scan to<br>populate this panel')+'</div>';return;}
   el.innerHTML=spots.map(function(s,i){
     var cls=s.tuned?'tuned':s.worked?'worked':'';
     var badge=s.tuned?'<span class="spot-badge tuned">&#9679; TUNED</span>'
@@ -2062,44 +2163,12 @@ function updateSpotsPanel(d){
       fetch('/tune',{method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({activator:s.activator,park:s.park,freq_khz:s.freq_khz,mode:s.mode,tuned:s.tuned})});
     });});}
-var lastSpotData=null;
+
 function refreshData(){
   fetch('/data').then(function(r){return r.json();}).then(function(d){
     lastSpotData=d;
-    clearMarkers();
-    (d.qsos||[]).forEach(function(q){
-      var m=L.circleMarker([q.lat,q.lon],{radius:6,color:'#cc44ff',fillColor:'#cc44ff',fillOpacity:0.7,weight:1});
-      var pop='<b>'+q.call+'</b>';
-      if(q.park)pop+=' ['+q.park+']';
-      if(q.band||q.mode)pop+='<br>'+[q.band,q.mode].filter(Boolean).join(' ');
-      if(q.date)pop+='<br>'+q.date+' '+q.time_on+'z';
-      m.bindPopup(pop);m.addTo(map);markers.push(m);});
-    (d.spots||[]).forEach(function(s){
-      var color=s.tuned?'#0077ff':s.worked?'#00bb44':'#ffff00';
-      var r=s.tuned?9:7;
-      var cls=(!s.tuned&&!s.worked)?'spot-flash':'';
-      var m=L.circleMarker([s.lat,s.lon],{radius:r,color:color,fillColor:color,fillOpacity:0.85,weight:s.tuned?2:1,className:cls});
-      var pop=s.activator+' ['+s.park+']<br>'+s.freq_khz+' kHz '+s.mode;
-      if(s.tuned)pop+='<br><b>&#x25CF; TUNED</b>';
-      if(s.worked)pop+='<br><b>Worked</b>';
-      m.bindPopup(pop);
-      m.on('click',function(e){
-        L.DomEvent.stopPropagation(e);
-        fetch('/tune',{method:'POST',headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({activator:s.activator,park:s.park,freq_khz:s.freq_khz,mode:s.mode,tuned:s.tuned})});});
-      m.addTo(map);markers.push(m);});
-    if(d.my_grid){
-      var mg=d.my_grid;
-      var star=L.marker([mg.lat,mg.lon],{icon:L.divIcon({
-        html:'<span style="color:#ff2222;font-size:18px;">&#9733;</span>',
-        className:'',iconAnchor:[9,9]})});
-      star.bindPopup('My grid: '+mg.gs);star.addTo(map);markers.push(star);}
-    if(d.my_grid&&d.tuned_spot){
-      var gcp=gcPoints(d.my_grid.lat,d.my_grid.lon,d.tuned_spot.lat,d.tuned_spot.lon,60);
-      beamLine=L.polyline(gcp,{color:'#0077ff',weight:2.5,dashArray:'12 8',opacity:0.85,className:'beam-anim'});
-      beamLine.addTo(map);}
-    updateStatsPanel(d);
-    updateSpotsPanel(d);
+    updateFilterPanels(d);
+    renderSpotsAndMarkers(d);
     var sb=document.getElementById('scan-btn');
     if(d.scanning){sb.className='active';sb.textContent='▶ SCANNING';}
     else{sb.className='paused';sb.textContent='⏸ SCAN PAUSED';}
@@ -2127,6 +2196,31 @@ refreshData();
 setInterval(refreshData,2000);
 map.on('click',function(){fetch('/scan',{method:'POST'});});
 document.getElementById('scan-btn').addEventListener('click',function(e){e.stopPropagation();fetch('/scan',{method:'POST'});});
+document.getElementById('stat-itu').addEventListener('click',function(e){
+  var chip=e.target.closest('.filter-chip[data-itu]');
+  if(!chip)return;
+  var v=Number(chip.dataset.itu);
+  if(filterItu.has(v))filterItu.delete(v);else filterItu.add(v);
+  if(lastSpotData)renderSpotsAndMarkers(lastSpotData);
+  chip.className='filter-chip'+(filterItu.has(v)?' active':'');});
+document.getElementById('hide-qrt-btn').addEventListener('click',function(){
+  hideQrt=!hideQrt;
+  this.className=hideQrt?'active':'';
+  if(lastSpotData)renderSpotsAndMarkers(lastSpotData);});
+document.getElementById('respot-btn').addEventListener('click',function(){
+  var statusEl=document.getElementById('respot-status');
+  if(!lastSpotData){statusEl.textContent='NO DATA';statusEl.style.color='var(--red)';return;}
+  var tuned=(lastSpotData.spots||[]).find(function(s){return s.tuned;});
+  if(!tuned){statusEl.textContent='NO TUNED SPOT';statusEl.style.color='var(--red)';return;}
+  statusEl.textContent='SENDING...';statusEl.style.color='var(--dim)';
+  fetch('/respot',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({activator:tuned.activator,reference:tuned.park,freq_khz:tuned.freq_khz,mode:tuned.mode})})
+  .then(function(r){return r.json();})
+  .then(function(r){
+    if(r.ok){statusEl.textContent='REPORTED ✔';statusEl.style.color='var(--green)';}
+    else{statusEl.textContent=r.error||'ERROR';statusEl.style.color='var(--red)';}
+    setTimeout(function(){statusEl.textContent='';},4000);})
+  .catch(function(){statusEl.textContent='ERROR';statusEl.style.color='var(--red)';});});
 document.getElementById('snipe-btn').addEventListener('click',function(){
   var popup=document.getElementById('snipe-popup');
   if(popup.style.display!=='none'){popup.style.display='none';return;}
@@ -2282,6 +2376,7 @@ document.getElementById('snipe-submit').addEventListener('click',function(e){
                             "tuned": tuned, "worked": worked,
                             "lat": lat, "lon": lon,
                             "spot_time": str(s.get("spotTime", s.get("timestamp", ""))),
+                            "comment": str(s.get("comments", s.get("comment", ""))).lower(),
                         })
                     my_grid_data = None
                     tuned_spot = None
@@ -2385,6 +2480,28 @@ document.getElementById('snipe-submit').addEventListener('click',function(e){
                     except _queue.Empty:
                         result = {"error": "timeout"}
                     self._send_json(result)
+                elif self.path == '/respot':
+                    try:
+                        length = int(self.headers.get('Content-Length', 0))
+                        data = json.loads(self.rfile.read(length))
+                    except Exception:
+                        self._send_json({"error": "bad json"}, status=400)
+                        return
+                    mycall = app.cfg.get("callsign", "").upper()
+                    if not mycall:
+                        self._send_json({"error": "No callsign configured"})
+                        return
+                    ok, err = pota_post_spot(
+                        activator=str(data.get("activator", "")),
+                        spotter=mycall,
+                        reference=str(data.get("reference", "")),
+                        freq_khz=data.get("freq_khz", ""),
+                        mode=str(data.get("mode", "")),
+                    )
+                    if ok:
+                        self._send_json({"ok": True})
+                    else:
+                        self._send_json({"error": err or "Unknown error"})
                 else:
                     self._send_json({"error": "not found"}, status=404)
 
