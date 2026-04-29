@@ -1915,8 +1915,9 @@ header::after{content:'';position:absolute;inset:0;pointer-events:none;backgroun
 #hide-qrt-btn{width:100%;padding:4px 0;font-family:'Orbitron',sans-serif;font-size:.52rem;letter-spacing:2px;background:transparent;border:1px solid var(--red);color:var(--red);cursor:pointer;transition:all .2s;margin-bottom:4px;}
 #hide-qrt-btn:hover{background:rgba(255,32,32,.07);}
 #hide-qrt-btn.active{border-color:var(--green);color:var(--green);text-shadow:0 0 6px rgba(0,255,136,.4);}
-#respot-btn{width:100%;padding:6px 0;font-family:'Orbitron',sans-serif;font-size:.52rem;letter-spacing:2px;background:transparent;border:1px solid var(--amber);color:var(--amber);cursor:pointer;text-shadow:0 0 6px rgba(255,153,0,.3);transition:all .2s;margin-top:4px;}
+#respot-btn{width:100%;padding:6px 0;font-family:'Orbitron',sans-serif;font-size:.52rem;letter-spacing:2px;background:transparent;border:1px solid var(--amber);color:var(--amber);cursor:pointer;transition:all .2s;margin-top:4px;}
 #respot-btn:hover{background:rgba(255,153,0,.08);box-shadow:0 0 10px rgba(255,153,0,.2);}
+#respot-btn.active{border-color:var(--green);color:var(--green);text-shadow:0 0 6px rgba(0,255,136,.4);}
 #respot-status{font-size:.52rem;color:var(--green);display:block;text-align:center;margin-top:2px;min-height:.8rem;}
 .map-area{flex:1;position:relative;overflow:hidden;}
 #map{width:100%;height:100%;background:#020810;}
@@ -1943,8 +1944,14 @@ header::after{content:'';position:absolute;inset:0;pointer-events:none;backgroun
 #scan-btn.active{color:var(--green);border-color:var(--green);text-shadow:0 0 8px var(--green);}
 #scan-btn.paused{color:var(--red);border-color:var(--red-dim);}
 .map-overlays{position:absolute;top:10px;right:14px;z-index:500;display:flex;gap:8px;pointer-events:none;}
-#snipe-btn{width:100%;padding:6px 0;font-family:'Orbitron',sans-serif;font-size:.58rem;letter-spacing:2px;background:transparent;border:1px solid var(--green);color:var(--green);cursor:pointer;text-shadow:0 0 6px rgba(0,255,136,.4);transition:all .2s;}
+#snipe-btn{width:100%;padding:18px 0;font-family:'Orbitron',sans-serif;font-size:.58rem;letter-spacing:2px;background:transparent;border:1px solid var(--green);color:var(--green);cursor:pointer;text-shadow:0 0 6px rgba(0,255,136,.4);transition:all .2s;}
 #snipe-btn:hover{background:rgba(0,255,136,.08);box-shadow:0 0 10px rgba(0,255,136,.2);}
+.scan-rate-btn{flex:1;padding:4px 0;font-family:'Orbitron',sans-serif;font-size:.5rem;letter-spacing:2px;background:transparent;border:1px solid var(--dim);color:var(--dim);cursor:pointer;transition:all .15s;}
+.scan-rate-btn.active{border-color:var(--amber);color:var(--amber);text-shadow:0 0 6px rgba(255,153,0,.3);}
+.scan-rate-btn:hover{opacity:.8;}
+#last-logged{display:none;border:1px solid #00e5ff;color:#00e5ff;padding:8px 6px;font-family:'Orbitron',sans-serif;font-size:.56rem;letter-spacing:1px;text-align:center;margin-top:4px;}
+#last-logged.flashing{animation:last-log-flash 1.5s ease-in-out 3 forwards;}
+@keyframes last-log-flash{0%,100%{opacity:0;box-shadow:none;}50%{opacity:1;box-shadow:0 0 12px rgba(0,229,255,.4);}}
 #snipe-popup{position:absolute;top:14px;left:50%;transform:translateX(-50%);z-index:500;background:rgba(7,13,18,.97);border:1px solid var(--green);padding:16px 21px;min-width:373px;box-shadow:0 0 20px rgba(0,255,136,.15);}
 .snipe-header{display:flex;justify-content:space-between;align-items:center;font-family:'Orbitron',sans-serif;font-size:.87rem;letter-spacing:2px;color:var(--green);margin-bottom:13px;border-bottom:1px solid var(--border);padding-bottom:8px;}
 .snipe-row{display:flex;align-items:center;gap:11px;margin-bottom:7px;}
@@ -1991,11 +1998,16 @@ header::after{content:'';position:absolute;inset:0;pointer-events:none;backgroun
         <div class="filter-chip" data-itu="2">R2</div>
         <div class="filter-chip" data-itu="3">R3</div>
       </div>
-      <div class="panel-title" style="margin-top:8px">◈ LOG</div>
       <button id="hide-qrt-btn">⊘ HIDE QRT</button>
-      <button id="snipe-btn">⊕ SNIPE QSO</button>
-      <button id="respot-btn">⟳ REPORT SPOT</button>
+      <div id="scan-rate-btns" style="display:flex;gap:6px;margin-top:2px;">
+        <button class="scan-rate-btn active" data-rate="15">⏱ 15S</button>
+        <button class="scan-rate-btn" data-rate="30">⏱ 30S</button>
+      </div>
+      <div class="panel-title" style="margin-top:8px">◈ LOG</div>
+      <button id="respot-btn">⟳ AUTO REPORT</button>
       <span id="respot-status"></span>
+      <button id="snipe-btn">⊕ SNIPE QSO</button>
+      <div id="last-logged"></div>
     </div>
   </div>
   <div class="map-area">
@@ -2053,6 +2065,7 @@ var filterBands=new Set();
 var filterModes=new Set();
 var filterItu=new Set();
 var hideQrt=false;
+var autoReport=false;
 
 function latLonToItuRegion(lat,lon){
   return lon<=-30?2:lon<=60?1:3;}
@@ -2087,7 +2100,7 @@ function updateFilterPanels(d){
   var allBands=[],seenB={};
   spots.forEach(function(s){var b=freqToBand(s.freq_khz);if(!seenB[b]){seenB[b]=1;allBands.push(b);}});
   allBands.sort();
-  buildFilterChips('stat-bands',allBands,filterBands,function(b){return BAND_COLORS[b]||'#aaa';},null);
+  buildFilterChips('stat-bands',allBands,filterBands,null,null);
 
   var allModes=[],seenM={};
   spots.forEach(function(s){var m=(s.mode||'').toUpperCase();if(m&&!seenM[m]){seenM[m]=1;allModes.push(m);}});
@@ -2111,7 +2124,7 @@ function renderSpotsAndMarkers(d){
     if(q.date)pop+='<br>'+q.date+' '+q.time_on+'z';
     m.bindPopup(pop);m.addTo(map);markers.push(m);});
   visible.forEach(function(s){
-    var color=s.tuned?'#0077ff':s.worked?'#00bb44':'#ffff00';
+    var color=s.tuned?'#00e5ff':s.worked?'#00bb44':'#ffff00';
     var r=s.tuned?9:7;
     var cls=(!s.tuned&&!s.worked)?'spot-flash':'';
     var m=L.circleMarker([s.lat,s.lon],{radius:r,color:color,fillColor:color,fillOpacity:0.85,weight:s.tuned?2:1,className:cls});
@@ -2132,7 +2145,7 @@ function renderSpotsAndMarkers(d){
     star.bindPopup('My grid: '+mg.gs);star.addTo(map);markers.push(star);}
   if(d.my_grid&&d.tuned_spot){
     var gcp=gcPoints(d.my_grid.lat,d.my_grid.lon,d.tuned_spot.lat,d.tuned_spot.lon,60);
-    beamLine=L.polyline(gcp,{color:'#0077ff',weight:2.5,dashArray:'12 8',opacity:0.85,className:'beam-anim'});
+    beamLine=L.polyline(gcp,{color:'#00e5ff',weight:2.5,dashArray:'12 8',opacity:0.85,className:'beam-anim'});
     beamLine.addTo(map);}
   var total=(d.spots||[]).length,shown=visible.length;
   document.getElementById('stat-spots').textContent=shown===total?total:(shown+'/'+total)||'—';
@@ -2173,6 +2186,15 @@ function refreshData(){
     if(d.scanning){sb.className='active';sb.textContent='▶ SCANNING';}
     else{sb.className='paused';sb.textContent='⏸ SCAN PAUSED';}
     if(d.callsign){document.getElementById('mycall').textContent=d.callsign;}
+    if(typeof d.hide_qrt==='boolean'&&d.hide_qrt!==hideQrt){
+      hideQrt=d.hide_qrt;
+      document.getElementById('hide-qrt-btn').className=hideQrt?'active':'';}
+    if(typeof d.auto_respot==='boolean'){
+      autoReport=d.auto_respot;
+      document.getElementById('respot-btn').className=autoReport?'active':'';}
+    if(d.scan_interval){
+      document.querySelectorAll('.scan-rate-btn').forEach(function(b){
+        b.className='scan-rate-btn'+(Number(b.dataset.rate)===d.scan_interval?' active':'');});}
   }).catch(function(e){console.error('Fetch error:',e);});}
 function gcPoints(la1,lo1,la2,lo2,n){
   var R=Math.PI/180;
@@ -2206,21 +2228,21 @@ document.getElementById('stat-itu').addEventListener('click',function(e){
 document.getElementById('hide-qrt-btn').addEventListener('click',function(){
   hideQrt=!hideQrt;
   this.className=hideQrt?'active':'';
-  if(lastSpotData)renderSpotsAndMarkers(lastSpotData);});
+  if(lastSpotData)renderSpotsAndMarkers(lastSpotData);
+  fetch('/set_hide_qrt',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({enabled:hideQrt})});});
 document.getElementById('respot-btn').addEventListener('click',function(){
-  var statusEl=document.getElementById('respot-status');
-  if(!lastSpotData){statusEl.textContent='NO DATA';statusEl.style.color='var(--red)';return;}
-  var tuned=(lastSpotData.spots||[]).find(function(s){return s.tuned;});
-  if(!tuned){statusEl.textContent='NO TUNED SPOT';statusEl.style.color='var(--red)';return;}
-  statusEl.textContent='SENDING...';statusEl.style.color='var(--dim)';
-  fetch('/respot',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({activator:tuned.activator,reference:tuned.park,freq_khz:tuned.freq_khz,mode:tuned.mode})})
-  .then(function(r){return r.json();})
-  .then(function(r){
-    if(r.ok){statusEl.textContent='REPORTED ✔';statusEl.style.color='var(--green)';}
-    else{statusEl.textContent=r.error||'ERROR';statusEl.style.color='var(--red)';}
-    setTimeout(function(){statusEl.textContent='';},4000);})
-  .catch(function(){statusEl.textContent='ERROR';statusEl.style.color='var(--red)';});});
+  autoReport=!autoReport;
+  this.className=autoReport?'active':'';
+  fetch('/set_autorespot',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({enabled:autoReport})});});
+document.querySelectorAll('.scan-rate-btn').forEach(function(btn){
+  btn.addEventListener('click',function(){
+    var rate=Number(btn.dataset.rate);
+    document.querySelectorAll('.scan-rate-btn').forEach(function(b){b.className='scan-rate-btn';});
+    btn.className='scan-rate-btn active';
+    fetch('/set_scan_interval',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({interval:rate})});});});
 document.getElementById('snipe-btn').addEventListener('click',function(){
   var popup=document.getElementById('snipe-popup');
   if(popup.style.display!=='none'){popup.style.display='none';return;}
@@ -2255,6 +2277,13 @@ document.getElementById('snipe-submit').addEventListener('click',function(e){
     .then(function(r){
       if(r.ok){
         document.getElementById('snipe-status').textContent='LOGGED ✔';
+        var tuned=lastSpotData&&lastSpotData.spots?lastSpotData.spots.find(function(s){return s.tuned;}):null;
+        var ll=document.getElementById('last-logged');
+        ll.textContent=call+(payload.park_nr?' ['+payload.park_nr+']':'')+(tuned?' '+tuned.freq_khz+'kHz '+tuned.mode:'');
+        ll.style.display='block';
+        void ll.offsetWidth;
+        ll.className='flashing';
+        ll.addEventListener('animationend',function(){ll.style.display='none';ll.className='';},{once:true});
         setTimeout(function(){document.getElementById('snipe-popup').style.display='none';},1200);
       }else{document.getElementById('snipe-status').textContent=r.error||'ERROR';}
     })
@@ -2448,6 +2477,9 @@ document.getElementById('snipe-submit').addEventListener('click',function(e){
                         "tuned_spot": tuned_spot,
                         "scanning": app._pota_scan_active,
                         "callsign": app.cfg.get("callsign", ""),
+                        "hide_qrt": app._pota_hide_qrt.get(),
+                        "auto_respot": app._pota_respot_enabled.get(),
+                        "scan_interval": app._pota_scan_interval.get(),
                     })
                 except Exception as exc:
                     self._send_json({"error": str(exc)}, status=500)
@@ -2502,6 +2534,36 @@ document.getElementById('snipe-submit').addEventListener('click',function(e){
                         self._send_json({"ok": True})
                     else:
                         self._send_json({"error": err or "Unknown error"})
+                elif self.path == '/set_autorespot':
+                    try:
+                        length = int(self.headers.get('Content-Length', 0))
+                        data = json.loads(self.rfile.read(length))
+                    except Exception:
+                        self._send_json({"error": "bad json"}, status=400)
+                        return
+                    val = bool(data.get('enabled', False))
+                    app.after(0, lambda v=val: app._pota_respot_enabled.set(v))
+                    self._send_json({"ok": True})
+                elif self.path == '/set_scan_interval':
+                    try:
+                        length = int(self.headers.get('Content-Length', 0))
+                        data = json.loads(self.rfile.read(length))
+                    except Exception:
+                        self._send_json({"error": "bad json"}, status=400)
+                        return
+                    val = int(data.get('interval', 15))
+                    app.after(0, lambda v=val: app._pota_scan_interval.set(max(5, min(60, v))))
+                    self._send_json({"ok": True})
+                elif self.path == '/set_hide_qrt':
+                    try:
+                        length = int(self.headers.get('Content-Length', 0))
+                        data = json.loads(self.rfile.read(length))
+                    except Exception:
+                        self._send_json({"error": "bad json"}, status=400)
+                        return
+                    val = bool(data.get('enabled', False))
+                    app.after(0, lambda v=val: app._pota_hide_qrt.set(v))
+                    self._send_json({"ok": True})
                 else:
                     self._send_json({"error": "not found"}, status=404)
 
