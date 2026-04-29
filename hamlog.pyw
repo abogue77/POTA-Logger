@@ -2015,11 +2015,11 @@ L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{
   attribution:'&copy; OpenStreetMap contributors &copy; CARTO',
   subdomains:'abcd',maxZoom:19}).addTo(map);
 var radarLayer=null,radarEnabled=false,radarTimestamps=[],radarFrameIndex=0,radarAnimTimer=null;
-var RADAR_SIZE=512,RADAR_COLOR=6,RADAR_OPTIONS='1_1',RADAR_OPACITY=0.5;
-function buildRadarUrl(ts){return 'https://tilecache.rainviewer.com/v2/radar/'+ts+'/'+RADAR_SIZE+'/{z}/{x}/{y}/'+RADAR_COLOR+'/'+RADAR_OPTIONS+'.png';}
+var RADAR_COLOR=6,RADAR_OPTIONS='1_1',RADAR_OPACITY=0.5;
+function buildRadarUrl(ts){return 'https://tilecache.rainviewer.com/v2/radar/'+ts+'/256/{z}/{x}/{y}/'+RADAR_COLOR+'/'+RADAR_OPTIONS+'.png';}
 function showRadarFrame(ts){
   if(radarLayer){map.removeLayer(radarLayer);radarLayer=null;}
-  radarLayer=L.tileLayer(buildRadarUrl(ts),{opacity:RADAR_OPACITY,attribution:'Weather: <a href="https://rainviewer.com" target="_blank">RainViewer</a>',maxZoom:19,tileSize:RADAR_SIZE,zIndex:5});
+  radarLayer=L.tileLayer(buildRadarUrl(ts),{opacity:RADAR_OPACITY,attribution:'Weather: <a href="https://rainviewer.com" target="_blank">RainViewer</a>',maxZoom:19,zIndex:5});
   radarLayer.addTo(map);}
 function startRadarAnimation(){
   if(!radarTimestamps.length)return;
