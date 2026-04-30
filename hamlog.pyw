@@ -225,7 +225,7 @@ def adif_field(tag, val):
     return f"<{tag.upper()}:{len(v)}>{v} "
 
 def adif_header(mycall):
-    now = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%SZ")
+    now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%SZ")
     prog = "POTA Hunter"
     return (f"POTA Hunter ADIF Log — {now}  Station: {mycall}\n"
             + adif_field("ADIF_VER","3.1.0")
@@ -2771,7 +2771,7 @@ document.getElementById('radar-btn').addEventListener('click',function(e){e.stop
                 values=(act, park, pname, freq, mode, stime, cmts))
         self._refresh_pota_highlights()
         self._check_freq_conflict()
-        now = datetime.datetime.utcnow().strftime("%H:%M:%Sz")
+        now = datetime.datetime.now(datetime.timezone.utc).strftime("%H:%M:%Sz")
         self._pota_status_lbl.config(
             text=f"● {len(spots)} activators  last updated {now}", fg=ACC3)
 
@@ -3084,7 +3084,7 @@ document.getElementById('radar-btn').addEventListener('click',function(e){e.stop
             messagebox.showerror("Required", "Callsign is required.")
             return
 
-        now      = datetime.datetime.utcnow()
+        now      = datetime.datetime.now(datetime.timezone.utc)
         date_str = now.strftime("%Y-%m-%d")
         time_str = now.strftime("%H%M")
 
