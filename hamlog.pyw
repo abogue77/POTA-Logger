@@ -1985,6 +1985,31 @@ header::after{content:'';position:absolute;inset:0;pointer-events:none;backgroun
 .spot-item .spot-dbl-hint{font-size:.48rem;color:var(--dim);letter-spacing:1px;
   margin-top:2px;opacity:0;transition:opacity .2s;}
 .spot-item:hover .spot-dbl-hint{opacity:1;}
+.mode-btn{display:block;width:100%;margin-top:10px;font-family:'Orbitron',sans-serif;
+  font-size:.55rem;letter-spacing:2px;padding:6px 0;border:1px solid var(--dim);
+  color:var(--dim);background:transparent;cursor:pointer;text-transform:uppercase;transition:all .2s;}
+.mode-btn.activator{border-color:var(--amber);color:var(--amber);
+  box-shadow:0 0 8px rgba(255,153,0,.15);}
+.mode-btn:hover{opacity:.85;}
+#respot-btn{display:block;width:100%;margin-top:6px;font-family:'Orbitron',sans-serif;
+  font-size:.55rem;letter-spacing:2px;padding:6px 0;border:1px solid var(--dim);
+  color:var(--dim);background:transparent;cursor:pointer;text-transform:uppercase;transition:all .2s;}
+#respot-btn:hover{border-color:#00e5ff;color:#00e5ff;}
+#respot-panel{margin-top:6px;padding:8px 10px;border:1px solid var(--border);
+  background:rgba(0,229,255,.03);display:none;}
+.respot-row{display:flex;gap:6px;align-items:center;margin-bottom:6px;}
+.respot-input{flex:1;background:rgba(0,229,255,.04);border:1px solid var(--border);
+  color:var(--text);font-family:'Share Tech Mono',monospace;font-size:.75rem;
+  padding:4px 7px;outline:none;transition:border-color .15s;}
+.respot-input:focus{border-color:var(--cyan);}
+.respot-go{font-family:'Orbitron',sans-serif;font-size:.5rem;letter-spacing:1px;
+  padding:4px 8px;border:1px solid var(--cyan);color:var(--cyan);background:transparent;
+  cursor:pointer;text-transform:uppercase;white-space:nowrap;transition:all .15s;}
+.respot-go:hover{background:rgba(0,229,255,.1);}
+.respot-go:disabled{opacity:.35;cursor:not-allowed;}
+#respot-status{font-size:.55rem;letter-spacing:1px;min-height:1.2em;}
+#respot-status.ok{color:var(--green);}
+#respot-status.err{color:#ff4040;}
 </style>
 </head>
 <body>
@@ -2031,6 +2056,15 @@ header::after{content:'';position:absolute;inset:0;pointer-events:none;backgroun
         <div class="stn-detail" id="ll-detail"></div>
       </div>
       <div style="color:var(--dim);font-size:.56rem;letter-spacing:1px" id="ll-empty">NO LOGGED QSOs</div>
+      <button id="mode-toggle-btn" class="mode-btn" onclick="toggleMode()">&#9671; ACTIVATOR MODE</button>
+      <button id="respot-btn" onclick="toggleRespoPanel()">&#8635; RE-SPOT MY STATION</button>
+      <div id="respot-panel">
+        <div class="respot-row">
+          <input class="respot-input" id="respot-park" type="text" placeholder="PARK REF" autocomplete="off" spellcheck="false">
+          <button class="respot-go" id="respot-go-btn" onclick="doRespot()">&#9654; SPOT</button>
+        </div>
+        <div id="respot-status"></div>
+      </div>
     </div>
   </div>
   <div class="map-area">
@@ -2085,7 +2119,7 @@ function disableRadar(){
   if(radarRefreshTimer){clearInterval(radarRefreshTimer);radarRefreshTimer=null;}
   if(radarLayer){map.removeLayer(radarLayer);radarLayer=null;}
   var btn=document.getElementById('radar-btn');btn.className='off';btn.textContent='◎ RADAR OFF';}
-var markers=[],beamLine=null,_tunedSpot=null;
+var markers=[],beamLine=null,_tunedSpot=null,_activatorMode=false,_lastPark='';
 var BAND_COLORS={'160m':'#ff4444','80m':'#ff8800','60m':'#ffcc00','40m':'#aaff00',
   '30m':'#00ffaa','20m':'#00e5ff','17m':'#0088ff','15m':'#8844ff',
   '12m':'#ff44cc','10m':'#ff2288','6m':'#ff0055','2m':'#ff6688','other':'#aaaaaa'};
@@ -2236,6 +2270,37 @@ setInterval(function(){
   var el=document.getElementById('scan-dots');
   if(el)el.textContent='.'.repeat(_dotPhase+1);
 },500);
+function toggleMode(){
+  _activatorMode=!_activatorMode;
+  var btn=document.getElementById('mode-toggle-btn');
+  if(_activatorMode){btn.textContent='&#9670; HUNTER MODE';btn.className='mode-btn activator';}
+  else{btn.textContent='&#9671; ACTIVATOR MODE';btn.className='mode-btn';}}
+function toggleRespoPanel(){
+  var p=document.getElementById('respot-panel');
+  var open=p.style.display==='none'||p.style.display==='';
+  p.style.display=open?'block':'none';
+  if(open){
+    document.getElementById('respot-park').value=_lastPark;
+    document.getElementById('respot-status').textContent='';
+    document.getElementById('respot-status').className='';
+    document.getElementById('respot-go-btn').disabled=false;
+    setTimeout(function(){document.getElementById('respot-park').focus();},50);}}
+function doRespot(){
+  var park=document.getElementById('respot-park').value.trim().toUpperCase();
+  var st=document.getElementById('respot-status');
+  if(!park){st.textContent='PARK REF REQUIRED';st.className='err';return;}
+  var btn=document.getElementById('respot-go-btn');
+  btn.disabled=true;st.textContent='SPOTTING…';st.className='';
+  fetch('/respot-self',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({reference:park})})
+    .then(function(r){return r.json();})
+    .then(function(data){
+      if(data.ok){
+        _lastPark=park;
+        st.textContent='SPOT SENT ✔';st.className='ok';
+        setTimeout(function(){st.textContent='';st.className='';btn.disabled=false;},3000);
+      }else{st.textContent='ERROR: '+(data.error||'unknown');st.className='err';btn.disabled=false;}})
+    .catch(function(){st.textContent='NETWORK ERROR';st.className='err';btn.disabled=false;});}
 function openLogModal(spot){
   var s=spot||_tunedSpot;
   if(!s)return;
@@ -2272,8 +2337,20 @@ function submitLogQSO(){
     body:JSON.stringify(payload)})
     .then(function(r){return r.json();})
     .then(function(data){
-      if(data.ok){st.textContent='LOGGED ✔';st.className='ok';setTimeout(closeLogModal,900);}
-      else{st.textContent='ERROR: '+(data.error||'unknown');st.className='err';btn.disabled=false;}})
+      if(data.ok){
+        _lastPark=payload.park||_lastPark;
+        st.textContent='LOGGED ✔';st.className='ok';
+        if(_activatorMode){
+          setTimeout(function(){
+            document.getElementById('lm-call').value='';
+            document.getElementById('lm-rst-s').value='59';
+            document.getElementById('lm-rst-r').value='59';
+            st.textContent='';st.className='';
+            btn.disabled=false;
+            document.getElementById('lm-call').focus();
+          },700);
+        }else{setTimeout(closeLogModal,900);}
+      }else{st.textContent='ERROR: '+(data.error||'unknown');st.className='err';btn.disabled=false;}})
     .catch(function(){st.textContent='NETWORK ERROR';st.className='err';btn.disabled=false;});}
 refreshData();
 setInterval(refreshData,2000);
@@ -2559,6 +2636,42 @@ document.getElementById('log-modal-overlay').addEventListener('click',function(e
                         return
                     app.after(0, lambda d=data: app._on_map_station_click(d))
                     self._send_json({"ok": True})
+                elif self.path == '/respot-self':
+                    try:
+                        length = int(self.headers.get('Content-Length', 0))
+                        data = json.loads(self.rfile.read(length))
+                    except Exception:
+                        self._send_json({"error": "bad json"}, status=400)
+                        return
+                    reference = str(data.get("reference", "")).strip().upper()
+                    mycall = app.cfg.get("callsign", "").upper()
+                    if not mycall:
+                        self._send_json({"error": "No callsign configured"}, status=400)
+                        return
+                    if not reference:
+                        self._send_json({"error": "Park reference required"}, status=400)
+                        return
+                    try:
+                        freq_khz = str(round(float(app._flrig_freq_hz) / 1000)) if app._flrig_freq_hz else None
+                    except Exception:
+                        freq_khz = None
+                    if not freq_khz:
+                        self._send_json({"error": "Frequency unknown — connect Flrig"}, status=400)
+                        return
+                    mode = str(app._flrig_mode).upper() if app._flrig_mode else "SSB"
+                    ok, err = pota_post_spot(
+                        activator=mycall,
+                        spotter=mycall,
+                        reference=reference,
+                        freq_khz=freq_khz,
+                        mode=mode,
+                        comment="Self-spotted via POTA Hunter",
+                    )
+                    if ok:
+                        app.after(0, lambda: app._set_status("Self-spot posted ✔"))
+                        self._send_json({"ok": True})
+                    else:
+                        self._send_json({"error": err or "POTA API error"}, status=502)
                 elif self.path == '/log':
                     try:
                         length = int(self.headers.get('Content-Length', 0))
