@@ -1949,6 +1949,42 @@ header::after{content:'';position:absolute;inset:0;pointer-events:none;backgroun
 #radar-btn{cursor:pointer;font-family:'Orbitron',sans-serif;font-size:.6rem;letter-spacing:2px;padding:4px 12px;border:1px solid currentColor;transition:all .2s;user-select:none;margin-left:8px;}
 #radar-btn.off{color:var(--dim);border-color:var(--dim);}
 #radar-btn.on{color:var(--cyan);border-color:var(--cyan);text-shadow:0 0 8px rgba(0,229,255,.7);}
+#log-modal-overlay{position:fixed;inset:0;z-index:9500;background:rgba(0,0,0,.82);
+  display:none;align-items:center;justify-content:center;}
+#log-modal{background:#060d14;border:1px solid var(--cyan);padding:22px 26px;width:340px;
+  font-family:'Share Tech Mono',monospace;position:relative;
+  box-shadow:0 0 40px rgba(0,229,255,.18);}
+#log-modal::before{content:'';position:absolute;top:0;left:0;width:3px;height:100%;background:var(--cyan);}
+.lm-title{font-family:'Orbitron',sans-serif;font-size:.75rem;letter-spacing:3px;color:var(--cyan);
+  margin-bottom:16px;text-transform:uppercase;text-shadow:0 0 10px rgba(0,229,255,.5);}
+.lm-row{display:flex;flex-direction:column;gap:3px;margin-bottom:11px;}
+.lm-label{font-size:.55rem;letter-spacing:2px;color:var(--dim);text-transform:uppercase;}
+.lm-input{background:rgba(0,229,255,.04);border:1px solid var(--border);color:var(--text);
+  font-family:'Share Tech Mono',monospace;font-size:.8rem;padding:5px 8px;outline:none;width:100%;
+  box-sizing:border-box;transition:border-color .15s;}
+.lm-input:focus{border-color:var(--cyan);box-shadow:0 0 6px rgba(0,229,255,.2);}
+.lm-input[readonly]{color:var(--dim);cursor:default;}
+.lm-row-2{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+.lm-btns{display:flex;gap:10px;margin-top:16px;}
+.lm-btn{flex:1;font-family:'Orbitron',sans-serif;font-size:.6rem;letter-spacing:2px;padding:7px 0;
+  border:1px solid;cursor:pointer;transition:all .15s;text-transform:uppercase;background:transparent;}
+.lm-btn.confirm{color:var(--green);border-color:var(--green);}
+.lm-btn.confirm:hover{background:rgba(0,255,136,.1);box-shadow:0 0 10px rgba(0,255,136,.2);}
+.lm-btn.confirm:disabled{opacity:.35;cursor:not-allowed;}
+.lm-btn.cancel{color:#ff4040;border-color:#6a2020;}
+.lm-btn.cancel:hover{background:rgba(255,32,32,.08);}
+#lm-status{font-size:.6rem;letter-spacing:1px;min-height:1.4em;text-align:center;margin-top:8px;}
+#lm-status.ok{color:var(--green);}
+#lm-status.err{color:#ff4040;}
+#ts-log-btn{display:block;margin-top:8px;width:100%;font-family:'Orbitron',sans-serif;
+  font-size:.55rem;letter-spacing:2px;padding:5px 0;border:1px solid var(--cyan);
+  color:var(--cyan);background:transparent;cursor:pointer;text-transform:uppercase;transition:all .15s;}
+#ts-log-btn:hover{background:rgba(0,229,255,.1);box-shadow:0 0 8px rgba(0,229,255,.15);}
+.stn-box.tuned-s{cursor:pointer;}
+.stn-box.tuned-s:hover{background:rgba(0,229,255,.08);box-shadow:0 0 8px rgba(0,229,255,.1);}
+.spot-item .spot-dbl-hint{font-size:.48rem;color:var(--dim);letter-spacing:1px;
+  margin-top:2px;opacity:0;transition:opacity .2s;}
+.spot-item:hover .spot-dbl-hint{opacity:1;}
 </style>
 </head>
 <body>
@@ -1982,18 +2018,19 @@ header::after{content:'';position:absolute;inset:0;pointer-events:none;backgroun
       <div class="chips" id="stat-bands">
         <div style="color:var(--dim);font-size:.6rem;letter-spacing:2px">NO SPOTS</div>
       </div>
+      <div class="panel-title" style="margin-top:6px">◈ TUNED STATION</div>
+      <div id="tuned-station-box" class="stn-box tuned-s" style="display:none" title="Double-click to log QSO" ondblclick="openLogModal(null)">
+        <div class="stn-call tuned-s" id="ts-call"></div>
+        <div class="stn-detail" id="ts-detail"></div>
+        <button id="ts-log-btn" onclick="event.stopPropagation();openLogModal(null)">&#9998; LOG QSO</button>
+      </div>
+      <div style="color:var(--dim);font-size:.56rem;letter-spacing:1px" id="ts-empty">NO TUNED STATION</div>
       <div class="panel-title" style="margin-top:6px">◈ LAST LOGGED</div>
       <div id="last-logged-box" class="stn-box logged" style="display:none">
         <div class="stn-call logged" id="ll-call"></div>
         <div class="stn-detail" id="ll-detail"></div>
       </div>
       <div style="color:var(--dim);font-size:.56rem;letter-spacing:1px" id="ll-empty">NO LOGGED QSOs</div>
-      <div class="panel-title" style="margin-top:6px">◈ TUNED STATION</div>
-      <div id="tuned-station-box" class="stn-box tuned-s" style="display:none">
-        <div class="stn-call tuned-s" id="ts-call"></div>
-        <div class="stn-detail" id="ts-detail"></div>
-      </div>
-      <div style="color:var(--dim);font-size:.56rem;letter-spacing:1px" id="ts-empty">NO TUNED STATION</div>
     </div>
   </div>
   <div class="map-area">
@@ -2048,7 +2085,7 @@ function disableRadar(){
   if(radarRefreshTimer){clearInterval(radarRefreshTimer);radarRefreshTimer=null;}
   if(radarLayer){map.removeLayer(radarLayer);radarLayer=null;}
   var btn=document.getElementById('radar-btn');btn.className='off';btn.textContent='◎ RADAR OFF';}
-var markers=[],beamLine=null;
+var markers=[],beamLine=null,_tunedSpot=null;
 var BAND_COLORS={'160m':'#ff4444','80m':'#ff8800','60m':'#ffcc00','40m':'#aaff00',
   '30m':'#00ffaa','20m':'#00e5ff','17m':'#0088ff','15m':'#8844ff',
   '12m':'#ff44cc','10m':'#ff2288','6m':'#ff0055','2m':'#ff6688','other':'#aaaaaa'};
@@ -2090,6 +2127,7 @@ function updateStatsPanel(d){
   var tsEmpty=document.getElementById('ts-empty');
   if(d.tuned_spot&&d.tuned_spot.activator){
     var ts=d.tuned_spot;
+    _tunedSpot=ts;
     document.getElementById('ts-call').textContent=ts.activator;
     var tdet='';
     if(ts.gs)tdet+='<span>Grid: '+ts.gs+'</span>';
@@ -2098,7 +2136,7 @@ function updateStatsPanel(d){
     if(mhz||ts.mode)tdet+='<span>'+[mhz,ts.mode].filter(Boolean).join(' ')+'</span>';
     document.getElementById('ts-detail').innerHTML=tdet;
     tsBox.style.display='block';tsEmpty.style.display='none';
-  }else{tsBox.style.display='none';tsEmpty.style.display='block';}}
+  }else{_tunedSpot=null;tsBox.style.display='none';tsEmpty.style.display='block';}}
 function updateSpotsPanel(d){
   var spots=(d.spots||[]).slice();
   spots.sort(function(a,b){return(a.spot_time||'').localeCompare(b.spot_time||'');});
@@ -2114,14 +2152,19 @@ function updateSpotsPanel(d){
       +'<div class="spot-call"><span>'+s.activator+'</span>'+badge+'</div>'
       +'<div class="spot-meta"><span class="spot-park">'+(s.park||'?')+'</span>'
       +'<span style="color:'+bc+'">'+band+'</span>'
-      +'<span>'+mhz+'</span><span>'+(s.mode||'')+'</span></div></div>';
+      +'<span>'+mhz+'</span><span>'+(s.mode||'')+'</span></div>'
+      +'<div class="spot-dbl-hint">DBL-CLICK TO LOG QSO</div></div>';
   }).join('');
   el.querySelectorAll('.spot-item').forEach(function(item){
     var i=parseInt(item.dataset.i);
+    var s=spots[i];
     item.addEventListener('click',function(){
-      var s=spots[i];
       fetch('/tune',{method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({activator:s.activator,park:s.park,freq_khz:s.freq_khz,mode:s.mode,tuned:s.tuned})});
+    });
+    item.addEventListener('dblclick',function(e){
+      e.stopPropagation();
+      openLogModal(s);
     });});}
 function refreshData(){
   fetch('/data').then(function(r){return r.json();}).then(function(d){
@@ -2193,12 +2236,99 @@ setInterval(function(){
   var el=document.getElementById('scan-dots');
   if(el)el.textContent='.'.repeat(_dotPhase+1);
 },500);
+function openLogModal(spot){
+  var s=spot||_tunedSpot;
+  if(!s)return;
+  document.getElementById('lm-call').value=s.activator||'';
+  document.getElementById('lm-park').value=s.park||'';
+  document.getElementById('lm-freq').value=s.freq_khz?String(s.freq_khz):'';
+  document.getElementById('lm-mode').value=s.mode||'';
+  document.getElementById('lm-grid').value=s.gs||'';
+  document.getElementById('lm-rst-s').value='59';
+  document.getElementById('lm-rst-r').value='59';
+  document.getElementById('lm-comment').value='';
+  var st=document.getElementById('lm-status');st.textContent='';st.className='';
+  document.getElementById('lm-submit-btn').disabled=false;
+  var ov=document.getElementById('log-modal-overlay');ov.style.display='flex';
+  setTimeout(function(){document.getElementById('lm-call').focus();},50);}
+function closeLogModal(){
+  document.getElementById('log-modal-overlay').style.display='none';}
+function submitLogQSO(){
+  var call=document.getElementById('lm-call').value.trim().toUpperCase();
+  var st=document.getElementById('lm-status');
+  if(!call){st.textContent='CALLSIGN REQUIRED';st.className='err';return;}
+  var payload={
+    call:call,
+    park:document.getElementById('lm-park').value.trim(),
+    freq_khz:parseFloat(document.getElementById('lm-freq').value)||0,
+    mode:document.getElementById('lm-mode').value.trim().toUpperCase(),
+    rst_sent:document.getElementById('lm-rst-s').value.trim()||'59',
+    rst_rcvd:document.getElementById('lm-rst-r').value.trim()||'59',
+    gridsquare:document.getElementById('lm-grid').value.trim().toUpperCase(),
+    comment:document.getElementById('lm-comment').value.trim()};
+  var btn=document.getElementById('lm-submit-btn');
+  btn.disabled=true;st.textContent='LOGGING…';st.className='';
+  fetch('/log',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(payload)})
+    .then(function(r){return r.json();})
+    .then(function(data){
+      if(data.ok){st.textContent='LOGGED ✔';st.className='ok';setTimeout(closeLogModal,900);}
+      else{st.textContent='ERROR: '+(data.error||'unknown');st.className='err';btn.disabled=false;}})
+    .catch(function(){st.textContent='NETWORK ERROR';st.className='err';btn.disabled=false;});}
 refreshData();
 setInterval(refreshData,2000);
 map.on('click',function(){fetch('/scan',{method:'POST'});});
 document.getElementById('scan-btn').addEventListener('click',function(e){e.stopPropagation();fetch('/scan',{method:'POST'});});
 document.getElementById('radar-btn').addEventListener('click',function(e){e.stopPropagation();if(radarEnabled){disableRadar();}else{enableRadar();}});
+document.addEventListener('keydown',function(e){if(e.key==='Escape'){closeLogModal();}});
+document.getElementById('log-modal-overlay').addEventListener('click',function(e){if(e.target===this){closeLogModal();}});
 </script>
+<div id="log-modal-overlay">
+  <div id="log-modal">
+    <div class="lm-title">&#9632; LOG QSO</div>
+    <div class="lm-row">
+      <div class="lm-label">Callsign</div>
+      <input class="lm-input" id="lm-call" type="text" autocomplete="off" spellcheck="false">
+    </div>
+    <div class="lm-row">
+      <div class="lm-label">Park Reference</div>
+      <input class="lm-input" id="lm-park" type="text" autocomplete="off" spellcheck="false">
+    </div>
+    <div class="lm-row-2">
+      <div class="lm-row" style="margin-bottom:0">
+        <div class="lm-label">Freq (kHz)</div>
+        <input class="lm-input" id="lm-freq" type="text" readonly>
+      </div>
+      <div class="lm-row" style="margin-bottom:0">
+        <div class="lm-label">Mode</div>
+        <input class="lm-input" id="lm-mode" type="text" readonly>
+      </div>
+    </div>
+    <div class="lm-row-2" style="margin-top:11px">
+      <div class="lm-row" style="margin-bottom:0">
+        <div class="lm-label">RST Sent</div>
+        <input class="lm-input" id="lm-rst-s" type="text" value="59">
+      </div>
+      <div class="lm-row" style="margin-bottom:0">
+        <div class="lm-label">RST Rcvd</div>
+        <input class="lm-input" id="lm-rst-r" type="text" value="59">
+      </div>
+    </div>
+    <div class="lm-row" style="margin-top:11px">
+      <div class="lm-label">Grid Square</div>
+      <input class="lm-input" id="lm-grid" type="text" autocomplete="off">
+    </div>
+    <div class="lm-row">
+      <div class="lm-label">Comment</div>
+      <input class="lm-input" id="lm-comment" type="text" autocomplete="off">
+    </div>
+    <div id="lm-status"></div>
+    <div class="lm-btns">
+      <button class="lm-btn confirm" id="lm-submit-btn" onclick="submitLogQSO()">&#9632; LOG QSO</button>
+      <button class="lm-btn cancel" onclick="closeLogModal()">&#10005; CANCEL</button>
+    </div>
+  </div>
+</div>
 </body>
 </html>"""
 
@@ -2429,6 +2559,25 @@ document.getElementById('radar-btn').addEventListener('click',function(e){e.stop
                         return
                     app.after(0, lambda d=data: app._on_map_station_click(d))
                     self._send_json({"ok": True})
+                elif self.path == '/log':
+                    try:
+                        length = int(self.headers.get('Content-Length', 0))
+                        data = json.loads(self.rfile.read(length))
+                    except Exception:
+                        self._send_json({"error": "bad json"}, status=400)
+                        return
+                    import queue as _queue
+                    result_q = _queue.Queue()
+                    app.after(0, lambda d=data, q=result_q: q.put(app._log_qso_from_web(d)))
+                    try:
+                        result = result_q.get(timeout=10)
+                    except _queue.Empty:
+                        self._send_json({"error": "timeout"}, status=500)
+                        return
+                    if result is True:
+                        self._send_json({"ok": True})
+                    else:
+                        self._send_json({"error": result}, status=400)
                 elif self.path == '/scan':
                     app.after(0, app._toggle_pota_scan)
                     self._send_json({"ok": True})
@@ -3138,6 +3287,66 @@ document.getElementById('radar-btn').addEventListener('click',function(e){e.stop
         self._refresh_pota_highlights()
         self._maybe_post_pota_spot(row)
         self._clear_form()
+
+    def _log_qso_from_web(self, data):
+        """Log a QSO submitted from the HTML map page. Returns True or an error string."""
+        if not self.adif_path:
+            return "No logbook open"
+        call = str(data.get("call", "")).strip().upper()
+        if not call:
+            return "Callsign required"
+
+        now      = datetime.datetime.now(datetime.timezone.utc)
+        date_str = now.strftime("%Y-%m-%d")
+        time_str = now.strftime("%H%M")
+
+        try:
+            freq_khz = float(data.get("freq_khz") or 0)
+            freq_mhz = freq_khz / 1000.0 if freq_khz else None
+        except (TypeError, ValueError):
+            freq_mhz = None
+
+        band = freq_to_band(freq_mhz) if freq_mhz else ""
+        mode = str(data.get("mode", "")).strip().upper()
+
+        row = {
+            "call":       call,
+            "date":       date_str,
+            "time_on":    time_str,
+            "freq":       freq_mhz,
+            "band":       band,
+            "mode":       mode,
+            "rst_sent":   str(data.get("rst_sent", "59")).strip() or "59",
+            "rst_rcvd":   str(data.get("rst_rcvd", "59")).strip() or "59",
+            "name":       "",
+            "qth":        "",
+            "gridsquare": str(data.get("gridsquare", "")).strip().upper(),
+            "park_nr":    str(data.get("park", "")).strip(),
+            "comment":    str(data.get("comment", "")).strip(),
+            "notes":      "",
+        }
+
+        try:
+            self.conn.execute("""
+                INSERT INTO qso (call,date,time_on,freq,band,mode,
+                    rst_sent,rst_rcvd,name,qth,gridsquare,park_nr,comment,notes)
+                VALUES (:call,:date,:time_on,:freq,:band,:mode,
+                    :rst_sent,:rst_rcvd,:name,:qth,:gridsquare,:park_nr,:comment,:notes)
+            """, row)
+            self.conn.commit()
+
+            mycall = self.cfg.get("callsign", "").upper()
+            with open(self.adif_path, "a", encoding="utf-8") as f:
+                f.write(row_to_adif(row, mycall))
+
+            self._reload_table()
+            self._refresh_pota_highlights()
+            self._maybe_post_pota_spot(row)
+            freq_disp = f"{freq_mhz:.4f} MHz" if freq_mhz else "freq unknown"
+            self._set_status(f"Web logged ✔  {call}  {date_str} {time_str}z  {freq_disp}  {band}  {mode}")
+            return True
+        except Exception as exc:
+            return str(exc)
 
     def _maybe_post_pota_spot(self, row):
         if not self._pota_respot_enabled.get():
