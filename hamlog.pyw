@@ -1986,10 +1986,12 @@ header::after{content:'';position:absolute;inset:0;pointer-events:none;backgroun
   margin-top:2px;opacity:0;transition:opacity .2s;}
 .spot-item:hover .spot-dbl-hint{opacity:1;}
 .mode-btn{display:block;width:100%;margin-top:10px;font-family:'Orbitron',sans-serif;
-  font-size:.55rem;letter-spacing:2px;padding:6px 0;border:1px solid var(--dim);
-  color:var(--dim);background:transparent;cursor:pointer;text-transform:uppercase;transition:all .2s;}
-.mode-btn.activator{border-color:var(--amber);color:var(--amber);
-  box-shadow:0 0 8px rgba(255,153,0,.15);}
+  font-size:.55rem;letter-spacing:2px;padding:6px 0;
+  border:1px solid #ff2020;color:#ff2020;
+  background:transparent;cursor:pointer;text-transform:uppercase;transition:all .2s;
+  box-shadow:0 0 8px rgba(255,32,32,.15);}
+.mode-btn.activator{border-color:var(--green);color:var(--green);
+  box-shadow:0 0 8px rgba(0,255,136,.2);}
 .mode-btn:hover{opacity:.85;}
 #respot-btn{display:block;width:100%;margin-top:6px;font-family:'Orbitron',sans-serif;
   font-size:.55rem;letter-spacing:2px;padding:6px 0;border:1px solid var(--dim);
@@ -2056,7 +2058,7 @@ header::after{content:'';position:absolute;inset:0;pointer-events:none;backgroun
         <div class="stn-detail" id="ll-detail"></div>
       </div>
       <div style="color:var(--dim);font-size:.56rem;letter-spacing:1px" id="ll-empty">NO LOGGED QSOs</div>
-      <button id="mode-toggle-btn" class="mode-btn" onclick="toggleMode()">&#9671; ACTIVATOR MODE</button>
+      <button id="mode-toggle-btn" class="mode-btn" onclick="toggleMode()">ACTIVATOR MODE</button>
       <button id="respot-btn" onclick="toggleRespoPanel()">&#8635; RE-SPOT MY STATION</button>
       <div id="respot-panel">
         <div class="respot-row">
@@ -2273,8 +2275,8 @@ setInterval(function(){
 function toggleMode(){
   _activatorMode=!_activatorMode;
   var btn=document.getElementById('mode-toggle-btn');
-  if(_activatorMode){btn.textContent='&#9670; HUNTER MODE';btn.className='mode-btn activator';}
-  else{btn.textContent='&#9671; ACTIVATOR MODE';btn.className='mode-btn';}}
+  if(_activatorMode){btn.textContent='HUNTER MODE';btn.className='mode-btn activator';openLogModal(null);}
+  else{btn.textContent='ACTIVATOR MODE';btn.className='mode-btn';}}
 function toggleRespoPanel(){
   var p=document.getElementById('respot-panel');
   var open=p.style.display==='none'||p.style.display==='';
