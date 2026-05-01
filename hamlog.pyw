@@ -2121,7 +2121,7 @@ function disableRadar(){
   if(radarRefreshTimer){clearInterval(radarRefreshTimer);radarRefreshTimer=null;}
   if(radarLayer){map.removeLayer(radarLayer);radarLayer=null;}
   var btn=document.getElementById('radar-btn');btn.className='off';btn.textContent='◎ RADAR OFF';}
-var markers=[],beamLine=null,_tunedSpot=null,_activatorMode=false,_lastPark='';
+var markers=[],beamLine=null,_tunedSpot=null,_activatorMode=false,_lastPark='',_flrigFreqKhz=null,_flrigMode=null;
 var BAND_COLORS={'160m':'#ff4444','80m':'#ff8800','60m':'#ffcc00','40m':'#aaff00',
   '30m':'#00ffaa','20m':'#00e5ff','17m':'#0088ff','15m':'#8844ff',
   '12m':'#ff44cc','10m':'#ff2288','6m':'#ff0055','2m':'#ff6688','other':'#aaaaaa'};
@@ -2247,6 +2247,8 @@ function refreshData(){
     var stxt=document.getElementById('status-text');
     if(d.flrig_connected){dot.className='status-dot connected';stxt.textContent='CONNECTED';}
     else{dot.className='status-dot offline';stxt.textContent='OFFLINE';}
+    if(d.flrig_freq_khz!=null){_flrigFreqKhz=d.flrig_freq_khz;}
+    if(d.flrig_mode){_flrigMode=d.flrig_mode;}
   }).catch(function(e){console.error('Fetch error:',e);});}
 function gcPoints(la1,lo1,la2,lo2,n){
   var R=Math.PI/180;
@@ -2304,13 +2306,28 @@ function doRespot(){
       }else{st.textContent='ERROR: '+(data.error||'unknown');st.className='err';btn.disabled=false;}})
     .catch(function(){st.textContent='NETWORK ERROR';st.className='err';btn.disabled=false;});}
 function openLogModal(spot){
-  var s=spot||_tunedSpot;
-  if(!s)return;
-  document.getElementById('lm-call').value=s.activator||'';
-  document.getElementById('lm-park').value=s.park||'';
-  document.getElementById('lm-freq').value=s.freq_khz?String(s.freq_khz):'';
-  document.getElementById('lm-mode').value=s.mode||'';
-  document.getElementById('lm-grid').value=s.gs||'';
+  var freqEl=document.getElementById('lm-freq');
+  var modeEl=document.getElementById('lm-mode');
+  if(_activatorMode){
+    document.getElementById('lm-call').value='';
+    document.getElementById('lm-park').value='';
+    document.getElementById('lm-grid').value='';
+    document.getElementById('lm-comment').value='';
+    freqEl.value=_flrigFreqKhz?String(_flrigFreqKhz):'';
+    modeEl.value=_flrigMode||'';
+    freqEl.removeAttribute('readonly');
+    modeEl.removeAttribute('readonly');
+  }else{
+    var s=spot||_tunedSpot;
+    if(!s)return;
+    document.getElementById('lm-call').value=s.activator||'';
+    document.getElementById('lm-park').value=s.park||'';
+    freqEl.value=s.freq_khz?String(s.freq_khz):'';
+    modeEl.value=s.mode||'';
+    document.getElementById('lm-grid').value=s.gs||'';
+    freqEl.setAttribute('readonly','');
+    modeEl.setAttribute('readonly','');
+  }
   document.getElementById('lm-rst-s').value='59';
   document.getElementById('lm-rst-r').value='59';
   document.getElementById('lm-comment').value='';
@@ -2319,6 +2336,8 @@ function openLogModal(spot){
   var ov=document.getElementById('log-modal-overlay');ov.style.display='flex';
   setTimeout(function(){document.getElementById('lm-call').focus();},50);}
 function closeLogModal(){
+  document.getElementById('lm-freq').setAttribute('readonly','');
+  document.getElementById('lm-mode').setAttribute('readonly','');
   document.getElementById('log-modal-overlay').style.display='none';}
 function submitLogQSO(){
   var call=document.getElementById('lm-call').value.trim().toUpperCase();
@@ -2623,6 +2642,8 @@ document.getElementById('log-modal-overlay').addEventListener('click',function(e
                         "scanning": app._pota_scan_active,
                         "callsign": app.cfg.get("callsign", ""),
                         "flrig_connected": app._flrig_freq_hz is not None,
+                        "flrig_freq_khz": round(float(app._flrig_freq_hz) / 1000, 3) if app._flrig_freq_hz else None,
+                        "flrig_mode": str(app._flrig_mode).upper() if app._flrig_mode else None,
                         "last_qso": qsos_out[0] if qsos_out else None,
                     })
                 except Exception as exc:
