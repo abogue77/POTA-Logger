@@ -46,6 +46,15 @@ DEFAULT_CONFIG = {
     "flrig_port": 12345,
     "last_logbook": "",
     "theme":      "dark",
+    "pota_band":              "All",
+    "pota_mode":              "All",
+    "pota_hide_qrt":          False,
+    "pota_itu_r1":            True,
+    "pota_itu_r2":            True,
+    "pota_itu_r3":            True,
+    "pota_respot_enabled":    False,
+    "pota_scan_skip_worked":  False,
+    "pota_scan_interval":     15,
 }
 
 def load_config():
@@ -1081,21 +1090,21 @@ class POTAHunter(tk.Tk):
         self._pota_spots_filtered = []
         self._freq_check_var    = tk.StringVar()
         self._freq_check_border = None
-        self._pota_band_var  = tk.StringVar(value="All")
-        self._pota_mode_var  = tk.StringVar(value="All")
-        self._pota_hide_qrt  = tk.BooleanVar(value=False)
-        self._pota_itu_r1    = tk.BooleanVar(value=True)
-        self._pota_itu_r2    = tk.BooleanVar(value=True)
-        self._pota_itu_r3    = tk.BooleanVar(value=True)
+        self._pota_band_var  = tk.StringVar(value=self.cfg.get("pota_band", "All"))
+        self._pota_mode_var  = tk.StringVar(value=self.cfg.get("pota_mode", "All"))
+        self._pota_hide_qrt  = tk.BooleanVar(value=self.cfg.get("pota_hide_qrt", False))
+        self._pota_itu_r1    = tk.BooleanVar(value=self.cfg.get("pota_itu_r1", True))
+        self._pota_itu_r2    = tk.BooleanVar(value=self.cfg.get("pota_itu_r2", True))
+        self._pota_itu_r3    = tk.BooleanVar(value=self.cfg.get("pota_itu_r3", True))
         self._pota_clicked_hz    = None
         self._pota_scan_active       = False
         self._pota_scan_idx          = 0
         self._pota_scan_after_id     = None
-        self._pota_scan_interval     = tk.IntVar(value=15)
-        self._pota_scan_skip_worked  = tk.BooleanVar(value=False)
+        self._pota_scan_interval     = tk.IntVar(value=self.cfg.get("pota_scan_interval", 15))
+        self._pota_scan_skip_worked  = tk.BooleanVar(value=self.cfg.get("pota_scan_skip_worked", False))
         self._pota_spot_ctx          = None
         self._last_tuned_spot_key    = None   # (activator, park) of most-recently tuned spot
-        self._pota_respot_enabled    = tk.BooleanVar(value=False)
+        self._pota_respot_enabled    = tk.BooleanVar(value=self.cfg.get("pota_respot_enabled", False))
         self._map_server             = None
         self._map_server_port        = None
         self._map_markers       = {}
@@ -1188,6 +1197,8 @@ class POTAHunter(tk.Tk):
         sm.add_command(label="Station Settings…", command=self._station_settings)
         sm.add_command(label="QRZ Login…",        command=self._qrz_settings)
         sm.add_command(label="Flrig Settings…",   command=self._flrig_settings)
+        sm.add_separator()
+        sm.add_command(label="Save Filter Settings", command=self._save_filter_settings)
         sm.add_separator()
         sm.add_command(label="Update POTA Parks DB…", command=self._update_parks_db)
         sm.add_separator()
@@ -3804,6 +3815,19 @@ document.getElementById('log-modal-overlay').addEventListener('click',function(e
     def _qrz_settings(self):     QRZDialog(self, self.cfg)
     def _flrig_settings(self):   FlrigDialog(self, self.cfg)
 
+    def _save_filter_settings(self):
+        self.cfg["pota_band"]             = self._pota_band_var.get()
+        self.cfg["pota_mode"]             = self._pota_mode_var.get()
+        self.cfg["pota_hide_qrt"]         = self._pota_hide_qrt.get()
+        self.cfg["pota_itu_r1"]           = self._pota_itu_r1.get()
+        self.cfg["pota_itu_r2"]           = self._pota_itu_r2.get()
+        self.cfg["pota_itu_r3"]           = self._pota_itu_r3.get()
+        self.cfg["pota_respot_enabled"]   = self._pota_respot_enabled.get()
+        self.cfg["pota_scan_skip_worked"] = self._pota_scan_skip_worked.get()
+        self.cfg["pota_scan_interval"]    = self._pota_scan_interval.get()
+        save_config(self.cfg)
+        self._set_status("Filter settings saved.")
+
     def _update_parks_db(self):
         if not messagebox.askyesno(
                 "Update POTA Parks DB",
@@ -3873,12 +3897,12 @@ document.getElementById('log-modal-overlay').addEventListener('click',function(e
         self._pota_after_id  = None
         self._pota_spots_raw      = []
         self._pota_spots_filtered = []
-        self._pota_band_var  = tk.StringVar(value="All")
-        self._pota_mode_var  = tk.StringVar(value="All")
-        self._pota_hide_qrt  = tk.BooleanVar(value=False)
-        self._pota_itu_r1    = tk.BooleanVar(value=True)
-        self._pota_itu_r2    = tk.BooleanVar(value=True)
-        self._pota_itu_r3    = tk.BooleanVar(value=True)
+        self._pota_band_var  = tk.StringVar(value=self.cfg.get("pota_band", "All"))
+        self._pota_mode_var  = tk.StringVar(value=self.cfg.get("pota_mode", "All"))
+        self._pota_hide_qrt  = tk.BooleanVar(value=self.cfg.get("pota_hide_qrt", False))
+        self._pota_itu_r1    = tk.BooleanVar(value=self.cfg.get("pota_itu_r1", True))
+        self._pota_itu_r2    = tk.BooleanVar(value=self.cfg.get("pota_itu_r2", True))
+        self._pota_itu_r3    = tk.BooleanVar(value=self.cfg.get("pota_itu_r3", True))
         self._pota_clicked_hz = None
         self._map_markers    = {}
         self._map_drawn      = False
