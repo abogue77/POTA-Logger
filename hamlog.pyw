@@ -2252,7 +2252,7 @@ function refreshData(){
       if(q.date)pop+='<br>'+q.date+' '+q.time_on+'z';
       m.bindPopup(pop);m.addTo(map);markers.push(m);});
     (d.spots||[]).forEach(function(s){
-      var color=s.tuned?'#00e5ff':s.worked?'#00bb44':'#ffff00';
+      var color=s.tuned?'#00e5ff':s.worked?'#00bb44':(_dayMode?'#000000':'#ffff00');
       var r=s.tuned?9:7;
       var cls=(!s.tuned&&!s.worked)?'spot-flash':'';
       var m=L.circleMarker([s.lat,s.lon],{radius:r,color:color,fillColor:color,fillOpacity:0.85,weight:s.tuned?2:1,className:cls});
