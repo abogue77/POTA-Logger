@@ -1094,6 +1094,7 @@ class POTAHunter(tk.Tk):
         self._pota_scan_interval     = tk.IntVar(value=15)
         self._pota_scan_skip_worked  = tk.BooleanVar(value=False)
         self._pota_spot_ctx          = None
+        self._last_tuned_spot_key    = None   # (activator, park) of most-recently tuned spot
         self._pota_respot_enabled    = tk.BooleanVar(value=False)
         self._map_server             = None
         self._map_server_port        = None
@@ -1885,11 +1886,16 @@ class POTAHunter(tk.Tk):
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
 :root{--red:#ff2020;--red-dim:#8b0000;--amber:#ff9900;--green:#00ff88;--cyan:#00e5ff;--bg:#030609;--panel:#070d12;--border:#1a3040;--text:#c8dde8;--dim:#3a5060;}
+:root.day-mode{--red:#990000;--red-dim:#6a1010;--amber:#7a3d00;--green:#004d22;--cyan:#003d77;--bg:#dfe6ed;--panel:#b8c8d8;--border:#4a7090;--text:#080e14;--dim:#2a4860;}
 *{margin:0;padding:0;box-sizing:border-box;}
 html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);font-family:'Share Tech Mono',monospace;}
 body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:9000;background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,.07) 2px,rgba(0,0,0,.07) 4px);}
+.day-mode body::before{display:none;}
 header{height:62px;display:flex;align-items:center;justify-content:space-between;padding:0 24px;border-bottom:1px solid var(--red);background:linear-gradient(90deg,#0a0002,#0d0008,#0a0002);position:relative;z-index:1000;flex-shrink:0;}
+.day-mode header{background:linear-gradient(90deg,#f5e8e8,#f8eeee,#f5e8e8);}
 header::after{content:'';position:absolute;inset:0;pointer-events:none;background:repeating-linear-gradient(90deg,transparent,transparent 60px,rgba(255,20,20,.025) 60px,rgba(255,20,20,.025) 61px);}
+#theme-btn{cursor:pointer;font-family:'Orbitron',sans-serif;font-size:.6rem;letter-spacing:2px;padding:4px 12px;border:1px solid var(--dim);color:var(--dim);background:transparent;transition:all .2s;user-select:none;margin-left:8px;}
+#theme-btn:hover{border-color:var(--amber);color:var(--amber);}
 .logo{font-family:'Orbitron',sans-serif;font-weight:900;font-size:1.2rem;color:var(--red);letter-spacing:4px;text-shadow:0 0 20px rgba(255,32,32,.8),0 0 40px rgba(255,32,32,.3);}
 .logo span{color:#fff;}
 .hdr-mid{display:flex;gap:36px;align-items:center;font-size:.85rem;letter-spacing:2px;color:var(--dim);}
@@ -1951,17 +1957,21 @@ header::after{content:'';position:absolute;inset:0;pointer-events:none;backgroun
 #radar-btn.on{color:var(--cyan);border-color:var(--cyan);text-shadow:0 0 8px rgba(0,229,255,.7);}
 #log-modal-overlay{position:fixed;inset:0;z-index:9500;background:rgba(0,0,0,.82);
   display:none;align-items:center;justify-content:center;}
-#log-modal{background:#060d14;border:1px solid var(--cyan);padding:22px 26px;width:340px;
+#log-modal{background:var(--panel);border:1px solid var(--cyan);padding:22px 26px;width:340px;
   font-family:'Share Tech Mono',monospace;position:relative;
   box-shadow:0 0 40px rgba(0,229,255,.18);}
+#log-modal.activator-mode{width:460px;padding:26px 32px;}
 #log-modal::before{content:'';position:absolute;top:0;left:0;width:3px;height:100%;background:var(--cyan);}
 .lm-title{font-family:'Orbitron',sans-serif;font-size:.75rem;letter-spacing:3px;color:var(--cyan);
   margin-bottom:16px;text-transform:uppercase;text-shadow:0 0 10px rgba(0,229,255,.5);}
+.activator-mode .lm-title{font-size:.9rem;}
 .lm-row{display:flex;flex-direction:column;gap:3px;margin-bottom:11px;}
 .lm-label{font-size:.55rem;letter-spacing:2px;color:var(--dim);text-transform:uppercase;}
+.activator-mode .lm-label{font-size:.65rem;}
 .lm-input{background:rgba(0,229,255,.04);border:1px solid var(--border);color:var(--text);
   font-family:'Share Tech Mono',monospace;font-size:.8rem;padding:5px 8px;outline:none;width:100%;
   box-sizing:border-box;transition:border-color .15s;}
+.activator-mode .lm-input{font-size:.95rem;padding:7px 10px;}
 .lm-input:focus{border-color:var(--cyan);box-shadow:0 0 6px rgba(0,229,255,.2);}
 .lm-input[readonly]{color:var(--dim);cursor:default;}
 .lm-row-2{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
@@ -1973,6 +1983,9 @@ header::after{content:'';position:absolute;inset:0;pointer-events:none;backgroun
 .lm-btn.confirm:disabled{opacity:.35;cursor:not-allowed;}
 .lm-btn.cancel{color:#ff4040;border-color:#6a2020;}
 .lm-btn.cancel:hover{background:rgba(255,32,32,.08);}
+.lm-btn.selfspot{color:var(--amber);border-color:#7a5000;}
+.lm-btn.selfspot:hover{background:rgba(255,153,0,.1);box-shadow:0 0 8px rgba(255,153,0,.15);}
+.lm-btn.selfspot:disabled{opacity:.35;cursor:not-allowed;}
 #lm-status{font-size:.6rem;letter-spacing:1px;min-height:1.4em;text-align:center;margin-top:8px;}
 #lm-status.ok{color:var(--green);}
 #lm-status.err{color:#ff4040;}
@@ -2025,6 +2038,7 @@ header::after{content:'';position:absolute;inset:0;pointer-events:none;backgroun
   <div style="display:flex;align-items:center;gap:0;">
     <div id="scan-btn" class="paused">⏸ SCAN PAUSED</div>
     <div id="radar-btn" class="off">◎ RADAR OFF</div>
+    <button id="theme-btn" onclick="toggleMapTheme()">&#9788; DAY</button>
   </div>
 </header>
 <div class="app-body">
@@ -2063,6 +2077,13 @@ header::after{content:'';position:absolute;inset:0;pointer-events:none;backgroun
       <div id="respot-panel">
         <div class="respot-row">
           <input class="respot-input" id="respot-park" type="text" placeholder="PARK REF" autocomplete="off" spellcheck="false">
+        </div>
+        <div class="respot-row" style="margin-top:5px">
+          <input class="respot-input" id="respot-freq" type="text" placeholder="FREQ (kHz)" autocomplete="off" spellcheck="false">
+          <input class="respot-input" id="respot-mode" type="text" placeholder="MODE" autocomplete="off" spellcheck="false" style="max-width:80px">
+        </div>
+        <div class="respot-row" style="margin-top:5px">
+          <input class="respot-input" id="respot-comment" type="text" placeholder="COMMENT (optional)" autocomplete="off" spellcheck="false">
           <button class="respot-go" id="respot-go-btn" onclick="doRespot()">&#9654; SPOT</button>
         </div>
         <div id="respot-status"></div>
@@ -2084,9 +2105,27 @@ header::after{content:'';position:absolute;inset:0;pointer-events:none;backgroun
 </div>
 <script>
 var map=L.map('map',{center:[20,0],zoom:2});
-L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{
+var _tileLayer=L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{
   attribution:'&copy; OpenStreetMap contributors &copy; CARTO',
-  subdomains:'abcd',maxZoom:19}).addTo(map);
+  subdomains:'abcd',maxZoom:19});
+_tileLayer.addTo(map);
+var _dayMode=(localStorage.getItem('mapTheme')==='day');
+function toggleMapTheme(){
+  _dayMode=!_dayMode;
+  localStorage.setItem('mapTheme',_dayMode?'day':'night');
+  _applyMapTheme();}
+function _applyMapTheme(){
+  var root=document.documentElement;
+  var btn=document.getElementById('theme-btn');
+  if(_dayMode){
+    root.classList.add('day-mode');
+    btn.textContent='☽ NIGHT';
+    _tileLayer.setUrl('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png');
+  }else{
+    root.classList.remove('day-mode');
+    btn.textContent='☀ DAY';
+    _tileLayer.setUrl('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png');}}
+_applyMapTheme();
 var radarLayer=null,radarEnabled=false,radarRefreshTimer=null;
 var RADAR_OPACITY=0.5;
 function buildRadarUrl(host,path){return host+path+'/256/{z}/{x}/{y}/6/1_1.png';}
@@ -2285,6 +2324,9 @@ function toggleRespoPanel(){
   p.style.display=open?'block':'none';
   if(open){
     document.getElementById('respot-park').value=_lastPark;
+    document.getElementById('respot-freq').value=_flrigFreqKhz?String(_flrigFreqKhz):'';
+    document.getElementById('respot-mode').value=_flrigMode||'';
+    document.getElementById('respot-comment').value='';
     document.getElementById('respot-status').textContent='';
     document.getElementById('respot-status').className='';
     document.getElementById('respot-go-btn').disabled=false;
@@ -2293,10 +2335,17 @@ function doRespot(){
   var park=document.getElementById('respot-park').value.trim().toUpperCase();
   var st=document.getElementById('respot-status');
   if(!park){st.textContent='PARK REF REQUIRED';st.className='err';return;}
+  var freq=document.getElementById('respot-freq').value.trim();
+  var mode=document.getElementById('respot-mode').value.trim().toUpperCase();
+  var comment=document.getElementById('respot-comment').value.trim();
   var btn=document.getElementById('respot-go-btn');
   btn.disabled=true;st.textContent='SPOTTING…';st.className='';
+  var payload={reference:park};
+  if(freq)payload.freq_khz=freq;
+  if(mode)payload.mode=mode;
+  if(comment)payload.comment=comment;
   fetch('/respot-self',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({reference:park})})
+    body:JSON.stringify(payload)})
     .then(function(r){return r.json();})
     .then(function(data){
       if(data.ok){
@@ -2305,7 +2354,32 @@ function doRespot(){
         setTimeout(function(){st.textContent='';st.className='';btn.disabled=false;},3000);
       }else{st.textContent='ERROR: '+(data.error||'unknown');st.className='err';btn.disabled=false;}})
     .catch(function(){st.textContent='NETWORK ERROR';st.className='err';btn.disabled=false;});}
+function submitSelfSpot(){
+  var park=document.getElementById('lm-park').value.trim().toUpperCase();
+  var st=document.getElementById('lm-status');
+  if(!park){st.textContent='PARK REF REQUIRED';st.className='err';return;}
+  var freq=document.getElementById('lm-freq').value.trim();
+  var mode=document.getElementById('lm-mode').value.trim().toUpperCase();
+  var comment=document.getElementById('lm-comment').value.trim();
+  var btn=document.getElementById('lm-selfspot-btn');
+  btn.disabled=true;st.textContent='SPOTTING…';st.className='';
+  var payload={reference:park};
+  if(freq)payload.freq_khz=freq;
+  if(mode)payload.mode=mode;
+  if(comment)payload.comment=comment;
+  fetch('/respot-self',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(payload)})
+  .then(function(r){return r.json();})
+  .then(function(data){
+    if(data.ok){st.textContent='SELF SPOT SENT ✔';st.className='ok';
+      setTimeout(function(){st.textContent='';st.className='';btn.disabled=false;},2500);}
+    else{st.textContent='SPOT ERROR: '+(data.error||'unknown');st.className='err';btn.disabled=false;}})
+  .catch(function(){st.textContent='NETWORK ERROR';st.className='err';btn.disabled=false;});}
 function openLogModal(spot){
+  var modal=document.getElementById('log-modal');
+  if(_activatorMode){modal.classList.add('activator-mode');}
+  else{modal.classList.remove('activator-mode');}
+  document.getElementById('lm-selfspot-btn').style.display=_activatorMode?'':'none';
   var freqEl=document.getElementById('lm-freq');
   var modeEl=document.getElementById('lm-mode');
   if(_activatorMode){
@@ -2364,6 +2438,7 @@ function submitLogQSO(){
         if(_activatorMode){
           setTimeout(function(){
             document.getElementById('lm-call').value='';
+            document.getElementById('lm-park').value='';
             document.getElementById('lm-rst-s').value='59';
             document.getElementById('lm-rst-r').value='59';
             st.textContent='';st.className='';
@@ -2421,8 +2496,11 @@ document.getElementById('log-modal-overlay').addEventListener('click',function(e
       <input class="lm-input" id="lm-comment" type="text" autocomplete="off">
     </div>
     <div id="lm-status"></div>
-    <div class="lm-btns">
+    <div class="lm-btns" style="margin-top:16px">
       <button class="lm-btn confirm" id="lm-submit-btn" onclick="submitLogQSO()">&#9632; LOG QSO</button>
+    </div>
+    <div class="lm-btns" style="margin-top:8px">
+      <button class="lm-btn selfspot" id="lm-selfspot-btn" style="display:none" onclick="submitSelfSpot()">&#10023; SELF SPOT</button>
       <button class="lm-btn cancel" onclick="closeLogModal()">&#10005; CANCEL</button>
     </div>
   </div>
@@ -2674,21 +2752,27 @@ document.getElementById('log-modal-overlay').addEventListener('click',function(e
                     if not reference:
                         self._send_json({"error": "Park reference required"}, status=400)
                         return
-                    try:
-                        freq_khz = str(round(float(app._flrig_freq_hz) / 1000)) if app._flrig_freq_hz else None
-                    except Exception:
-                        freq_khz = None
+                    # Use payload values if provided, otherwise fall back to flrig
+                    freq_khz = str(data.get("freq_khz", "")).strip() or None
                     if not freq_khz:
-                        self._send_json({"error": "Frequency unknown — connect Flrig"}, status=400)
+                        try:
+                            freq_khz = str(round(float(app._flrig_freq_hz) / 1000)) if app._flrig_freq_hz else None
+                        except Exception:
+                            freq_khz = None
+                    if not freq_khz:
+                        self._send_json({"error": "Frequency unknown — connect Flrig or enter manually"}, status=400)
                         return
-                    mode = str(app._flrig_mode).upper() if app._flrig_mode else "SSB"
+                    mode = str(data.get("mode", "")).strip().upper() or (
+                        str(app._flrig_mode).upper() if app._flrig_mode else "SSB"
+                    )
+                    comment = str(data.get("comment", "")).strip() or "Self-spotted via POTA Hunter"
                     ok, err = pota_post_spot(
                         activator=mycall,
                         spotter=mycall,
                         reference=reference,
                         freq_khz=freq_khz,
                         mode=mode,
-                        comment="Self-spotted via POTA Hunter",
+                        comment=comment,
                     )
                     if ok:
                         app.after(0, lambda: app._set_status("Self-spot posted ✔"))
@@ -2797,24 +2881,28 @@ document.getElementById('log-modal-overlay').addEventListener('click',function(e
         tk.Button(tb, text="⟳ Refresh", bg=BG3, fg=FG, font=SM,
                   relief="flat", cursor="hand2", padx=8,
                   command=self._manual_pota_refresh).pack(side="right", padx=6)
-        tk.Label(tb, text="s", bg=PBGK, fg=FG2, font=SM).pack(side="right")
-        tk.Spinbox(tb, from_=5, to=60, increment=5,
+
+        # Second toolbar row: scan controls and re-spot checkbox
+        tb2 = tk.Frame(parent, bg=PBGK)
+        tb2.pack(fill="x", padx=6, pady=(0, 2))
+        ttk.Checkbutton(
+            tb2, text="Auto re-spot QSO", variable=self._pota_respot_enabled
+        ).pack(side="left", padx=(0, 12))
+        ttk.Checkbutton(
+            tb2, text="Skip worked", variable=self._pota_scan_skip_worked
+        ).pack(side="left", padx=(0, 8))
+        self._pota_scan_btn = tk.Button(
+            tb2, text="▶ Scan", bg=BG3, fg=FG, font=SM,
+            relief="flat", cursor="hand2", padx=8, width=12,
+            command=self._toggle_pota_scan)
+        self._pota_scan_btn.pack(side="left", padx=(0, 6))
+        tk.Label(tb2, text="Interval:", bg=PBGK, fg=FG2, font=SM).pack(side="left", padx=(0, 2))
+        tk.Spinbox(tb2, from_=5, to=60, increment=5,
                    textvariable=self._pota_scan_interval,
                    width=4, bg=BG3, fg=FG, font=SM,
                    relief="flat", justify="center",
-                   buttonbackground=BG3).pack(side="right")
-        tk.Label(tb, text="Interval:", bg=PBGK, fg=FG2, font=SM).pack(side="right", padx=(8, 2))
-        self._pota_scan_btn = tk.Button(
-            tb, text="▶ Scan", bg=BG3, fg=FG, font=SM,
-            relief="flat", cursor="hand2", padx=8, width=12,
-            command=self._toggle_pota_scan)
-        self._pota_scan_btn.pack(side="right", padx=6)
-        ttk.Checkbutton(
-            tb, text="Skip worked", variable=self._pota_scan_skip_worked
-        ).pack(side="right", padx=(0, 6))
-        ttk.Checkbutton(
-            tb, text="Auto re-spot QSO", variable=self._pota_respot_enabled
-        ).pack(side="right", padx=(0, 6))
+                   buttonbackground=BG3).pack(side="left")
+        tk.Label(tb2, text="s", bg=PBGK, fg=FG2, font=SM).pack(side="left")
 
         # Treeview
         frm = tk.Frame(parent, bg=PBGK)
@@ -2932,6 +3020,9 @@ document.getElementById('log-modal-overlay').addEventListener('click',function(e
             self._stop_pota_scan()
 
     def _on_pota_spot_select(self, event=None):
+        if getattr(self, '_suppress_pota_tune', False):
+            self._suppress_pota_tune = False
+            return
         sel = self._pota_tree.selection()
         if not sel:
             return
@@ -2976,6 +3067,7 @@ document.getElementById('log-modal-overlay').addEventListener('click',function(e
 
         # Immediately highlight this row and suppress the flrig poll
         # from overwriting it before the tune command completes.
+        self._last_tuned_spot_key = (activator.strip().upper(), park.strip())
         self._pota_clicked_hz = freq_hz
         self._tune_suppress_until = time.monotonic() + 4.0
         self._refresh_pota_highlights()
@@ -3041,6 +3133,9 @@ document.getElementById('log-modal-overlay').addEventListener('click',function(e
 
     def _populate_pota_table(self, spots):
         self._pota_spots_filtered = list(spots)
+        # The selection is cleared after every tune, so track the last-tuned
+        # spot key instead of relying on the live tree selection.
+        restore_key = self._last_tuned_spot_key
         self._pota_tree.delete(*self._pota_tree.get_children())
         for s in spots:
             act   = s.get("activator",  s.get("activatorCallsign", ""))
@@ -3054,6 +3149,17 @@ document.getElementById('log-modal-overlay').addEventListener('click',function(e
             cmts  = s.get("comments",   s.get("comment", ""))
             self._pota_tree.insert("", "end",
                 values=(act, park, pname, freq, mode, stime, cmts))
+        # Restore the last-tuned row so arrow-key navigation resumes from the
+        # correct station after a refresh.  If the station is gone from the
+        # refreshed list, leave nothing selected rather than jumping elsewhere.
+        if restore_key:
+            for iid in self._pota_tree.get_children():
+                v = self._pota_tree.item(iid, "values")
+                if (str(v[0]).strip().upper(), str(v[1]).strip()) == restore_key:
+                    self._suppress_pota_tune = True
+                    self._pota_tree.selection_set(iid)
+                    self._pota_tree.focus(iid)
+                    break
         self._refresh_pota_highlights()
         self._check_freq_conflict()
         now = datetime.datetime.now(datetime.timezone.utc).strftime("%H:%M:%Sz")
