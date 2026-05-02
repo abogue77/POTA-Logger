@@ -2060,10 +2060,10 @@ header::after{content:'';position:absolute;inset:0;pointer-events:none;backgroun
         <div style="color:var(--dim);font-size:.6rem;letter-spacing:2px">NO SPOTS</div>
       </div>
       <div class="panel-title" style="margin-top:6px">◈ TUNED STATION</div>
-      <div id="tuned-station-box" class="stn-box tuned-s" style="display:none" title="Double-click to log QSO" ondblclick="openLogModal(null)">
+      <div id="tuned-station-box" class="stn-box tuned-s" style="display:none" title="Double-click to log QSO" ondblclick="openLogModal(_tunedCardSpot)">
         <div class="stn-call tuned-s" id="ts-call"></div>
         <div class="stn-detail" id="ts-detail"></div>
-        <button id="ts-log-btn" onclick="event.stopPropagation();openLogModal(null)">&#9998; LOG QSO</button>
+        <button id="ts-log-btn" onclick="event.stopPropagation();openLogModal(_tunedCardSpot)">&#9998; LOG QSO</button>
       </div>
       <div style="color:var(--dim);font-size:.56rem;letter-spacing:1px" id="ts-empty">NO TUNED STATION</div>
       <div class="panel-title" style="margin-top:6px">◈ LAST LOGGED</div>
@@ -2160,7 +2160,7 @@ function disableRadar(){
   if(radarRefreshTimer){clearInterval(radarRefreshTimer);radarRefreshTimer=null;}
   if(radarLayer){map.removeLayer(radarLayer);radarLayer=null;}
   var btn=document.getElementById('radar-btn');btn.className='off';btn.textContent='◎ RADAR OFF';}
-var markers=[],beamLine=null,_tunedSpot=null,_activatorMode=false,_lastPark='',_flrigFreqKhz=null,_flrigMode=null;
+var markers=[],beamLine=null,_tunedSpot=null,_tunedCardSpot=null,_activatorMode=false,_lastPark='',_flrigFreqKhz=null,_flrigMode=null;
 var BAND_COLORS={'160m':'#ff4444','80m':'#ff8800','60m':'#ffcc00','40m':'#aaff00',
   '30m':'#00ffaa','20m':'#00e5ff','17m':'#0088ff','15m':'#8844ff',
   '12m':'#ff44cc','10m':'#ff2288','6m':'#ff0055','2m':'#ff6688','other':'#aaaaaa'};
@@ -2202,7 +2202,7 @@ function updateStatsPanel(d){
   var tsEmpty=document.getElementById('ts-empty');
   if(d.tuned_spot&&d.tuned_spot.activator){
     var ts=d.tuned_spot;
-    _tunedSpot=ts;
+    _tunedSpot=ts;_tunedCardSpot=ts;
     document.getElementById('ts-call').textContent=ts.activator;
     var tdet='';
     if(ts.gs)tdet+='<span>Grid: '+ts.gs+'</span>';
@@ -2259,6 +2259,7 @@ function refreshData(){
       var pop=s.activator+' ['+s.park+']<br>'+s.freq_khz+' kHz '+s.mode;
       if(s.tuned)pop+='<br><b>&#x25CF; TUNED</b>';
       if(s.worked)pop+='<br><b>Worked</b>';
+      if(s.tuned)pop+='<br><button onclick="openLogModal(_tunedSpot)" style="margin-top:4px;font-size:.55rem;letter-spacing:2px;padding:3px 10px;border:1px solid #00e5ff;color:#00e5ff;background:transparent;cursor:pointer;">&#9998; LOG QSO</button>';
       m.bindPopup(pop);
       m.on('click',function(e){
         L.DomEvent.stopPropagation(e);
