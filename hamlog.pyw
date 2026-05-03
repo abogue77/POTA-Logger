@@ -1316,6 +1316,8 @@ class POTAHunter(tk.Tk):
         self._pota_scan_active       = False
         self._pota_scan_idx          = 0
         self._pota_scan_after_id     = None
+        self._scan_paused_by_map     = False
+        self._flrig_ptt              = False
         self._pota_scan_interval     = tk.IntVar(value=self.cfg.get("pota_scan_interval", 15))
         self._pota_scan_skip_worked  = tk.BooleanVar(value=self.cfg.get("pota_scan_skip_worked", False))
         self._pota_spot_ctx          = None
@@ -2198,16 +2200,16 @@ header::after{content:'';position:absolute;inset:0;pointer-events:none;backgroun
   box-shadow:0 0 40px rgba(0,229,255,.18);}
 #log-modal.activator-mode{width:460px;padding:26px 32px;}
 #log-modal::before{content:'';position:absolute;top:0;left:0;width:3px;height:100%;background:var(--cyan);}
-.lm-title{font-family:'Orbitron',sans-serif;font-size:.75rem;letter-spacing:3px;color:var(--cyan);
+.lm-title{font-family:'Orbitron',sans-serif;font-size:.9rem;letter-spacing:3px;color:var(--cyan);
   margin-bottom:16px;text-transform:uppercase;text-shadow:0 0 10px rgba(0,229,255,.5);}
-.activator-mode .lm-title{font-size:.9rem;}
+.activator-mode .lm-title{font-size:1.05rem;}
 .lm-row{display:flex;flex-direction:column;gap:3px;margin-bottom:11px;}
-.lm-label{font-size:.55rem;letter-spacing:2px;color:var(--dim);text-transform:uppercase;}
-.activator-mode .lm-label{font-size:.65rem;}
+.lm-label{font-size:.7rem;letter-spacing:2px;color:var(--dim);text-transform:uppercase;}
+.activator-mode .lm-label{font-size:.82rem;}
 .lm-input{background:rgba(0,229,255,.04);border:1px solid var(--border);color:var(--text);
-  font-family:'Share Tech Mono',monospace;font-size:.8rem;padding:5px 8px;outline:none;width:100%;
+  font-family:'Share Tech Mono',monospace;font-size:.9rem;padding:5px 8px;outline:none;width:100%;
   box-sizing:border-box;transition:border-color .15s;}
-.activator-mode .lm-input{font-size:.95rem;padding:7px 10px;}
+.activator-mode .lm-input{font-size:1.05rem;padding:7px 10px;}
 .lm-input:focus{border-color:var(--cyan);box-shadow:0 0 6px rgba(0,229,255,.2);}
 .lm-input[readonly]{color:var(--dim);cursor:default;}
 .lm-row-2{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
@@ -2222,6 +2224,8 @@ header::after{content:'';position:absolute;inset:0;pointer-events:none;backgroun
 .lm-btn.selfspot{color:var(--amber);border-color:#7a5000;}
 .lm-btn.selfspot:hover{background:rgba(255,153,0,.1);box-shadow:0 0 8px rgba(255,153,0,.15);}
 .lm-btn.selfspot:disabled{opacity:.35;cursor:not-allowed;}
+.lm-btn.clear{color:var(--cyan);border-color:#005a6e;}
+.lm-btn.clear:hover{background:rgba(0,229,255,.08);box-shadow:0 0 8px rgba(0,229,255,.1);}
 #lm-status{font-size:.6rem;letter-spacing:1px;min-height:1.4em;text-align:center;margin-top:8px;}
 #lm-status.ok{color:var(--green);}
 #lm-status.err{color:#ff4040;}
@@ -2633,7 +2637,7 @@ function openLogModal(spot){
   document.getElementById('lm-qth').value='';
   if(_activatorMode){
     document.getElementById('lm-call').value='';
-    document.getElementById('lm-park').value='';
+    document.getElementById('lm-park').value=_lastPark||'';
     document.getElementById('lm-grid').value='';
     document.getElementById('lm-comment').value='';
     freqEl.value=_flrigFreqKhz?String(_flrigFreqKhz):'';
@@ -2658,12 +2662,25 @@ function openLogModal(spot){
   document.getElementById('lm-comment').value='';
   var st=document.getElementById('lm-status');st.textContent='';st.className='';
   document.getElementById('lm-submit-btn').disabled=false;
+  document.getElementById('lm-clear-btn').style.display=_activatorMode?'':'none';
+  fetch('/scan_pause',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({state:1})});
   var ov=document.getElementById('log-modal-overlay');ov.style.display='flex';
   setTimeout(function(){document.getElementById('lm-call').focus();},50);}
 function closeLogModal(){
+  if(_activatorMode){deactivateActivatorMode();return;}
   document.getElementById('lm-freq').setAttribute('readonly','');
   document.getElementById('lm-mode').setAttribute('readonly','');
-  document.getElementById('log-modal-overlay').style.display='none';}
+  document.getElementById('log-modal-overlay').style.display='none';
+  fetch('/scan_pause',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({state:0})});}
+function deactivateActivatorMode(){
+  _activatorMode=false;
+  document.getElementById('mode-toggle-btn').textContent='ACTIVATOR MODE';
+  document.getElementById('mode-toggle-btn').className='mode-btn';
+  document.getElementById('lm-clear-btn').style.display='none';
+  document.getElementById('lm-freq').setAttribute('readonly','');
+  document.getElementById('lm-mode').setAttribute('readonly','');
+  document.getElementById('log-modal-overlay').style.display='none';
+  fetch('/scan_pause',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({state:0})});}
 function submitLogQSO(){
   var call=document.getElementById('lm-call').value.trim().toUpperCase();
   var st=document.getElementById('lm-status');
@@ -2693,7 +2710,7 @@ function submitLogQSO(){
             document.getElementById('lm-call').value='';
             document.getElementById('lm-name').value='';
             document.getElementById('lm-qth').value='';
-            document.getElementById('lm-park').value='';
+            document.getElementById('lm-park').value=_lastPark||'';
             document.getElementById('lm-rst-s').value='59';
             document.getElementById('lm-rst-r').value='59';
             st.textContent='';st.className='';
@@ -2709,7 +2726,7 @@ map.on('click',function(){fetch('/scan',{method:'POST'});});
 document.getElementById('scan-btn').addEventListener('click',function(e){e.stopPropagation();fetch('/scan',{method:'POST'});});
 document.getElementById('radar-btn').addEventListener('click',function(e){e.stopPropagation();if(radarEnabled){disableRadar();}else{enableRadar();}});
 document.addEventListener('keydown',function(e){if(e.key==='Escape'){closeLogModal();}});
-document.getElementById('log-modal-overlay').addEventListener('click',function(e){if(e.target===this){closeLogModal();}});
+document.addEventListener('click',function(e){if(e.target.id==='log-modal-overlay'){closeLogModal();}});
 function lmLookupCall(call){
   if(!call)return;
   fetch('/lookup?call='+encodeURIComponent(call))
@@ -2720,8 +2737,25 @@ function lmLookupCall(call){
       if(d.name&&!ne.value.trim())ne.value=d.name;
       if(d.qth&&!qe.value.trim())qe.value=d.qth;
     }).catch(function(){});}
-document.getElementById('lm-call').addEventListener('blur',function(){
-  lmLookupCall(this.value.trim().toUpperCase());});
+var _lmCallDebounce=null;
+document.addEventListener('focusout',function(e){
+  if(e.target.id!=='lm-call')return;
+  lmLookupCall(e.target.value.trim().toUpperCase());});
+document.addEventListener('input',function(e){
+  if(e.target.id!=='lm-call')return;
+  if(!_activatorMode)return;
+  var v=e.target.value.trim().toUpperCase();
+  clearTimeout(_lmCallDebounce);
+  if(v.length>=3){_lmCallDebounce=setTimeout(function(){lmLookupCall(v);},400);}});
+function clearLogModal(){
+  document.getElementById('lm-call').value='';
+  document.getElementById('lm-name').value='';
+  document.getElementById('lm-qth').value='';
+  document.getElementById('lm-rst-s').value='59';
+  document.getElementById('lm-rst-r').value='59';
+  document.getElementById('lm-comment').value='';
+  var st=document.getElementById('lm-status');st.textContent='';st.className='';
+  document.getElementById('lm-call').focus();}
 </script>
 <div id="log-modal-overlay">
   <div id="log-modal">
@@ -2776,6 +2810,7 @@ document.getElementById('lm-call').addEventListener('blur',function(){
     </div>
     <div class="lm-btns" style="margin-top:8px">
       <button class="lm-btn selfspot" id="lm-selfspot-btn" style="display:none" onclick="submitSelfSpot()">&#10023; SELF SPOT</button>
+      <button class="lm-btn clear" id="lm-clear-btn" style="display:none" onclick="clearLogModal()">&#9249; CLEAR</button>
       <button class="lm-btn cancel" onclick="closeLogModal()">&#10005; CANCEL</button>
     </div>
   </div>
@@ -3095,6 +3130,14 @@ document.getElementById('lm-call').addEventListener('blur',function(){
                 elif self.path == '/scan':
                     app.after(0, app._toggle_pota_scan)
                     self._send_json({"ok": True})
+                elif self.path == '/scan_pause':
+                    try:
+                        length = int(self.headers.get('Content-Length', 0))
+                        data = json.loads(self.rfile.read(length)) if length else {}
+                    except Exception:
+                        data = {}
+                    app._scan_paused_by_map = bool(data.get('state', 0))
+                    self._send_json({"ok": True})
                 else:
                     self._send_json({"error": "not found"}, status=404)
 
@@ -3331,6 +3374,8 @@ document.getElementById('lm-call').addEventListener('blur',function(){
         if getattr(self, '_suppress_pota_tune', False):
             self._suppress_pota_tune = False
             return
+        if self._scan_paused_by_map:
+            return
         sel = self._pota_tree.selection()
         if not sel:
             return
@@ -3411,6 +3456,8 @@ document.getElementById('lm-call').addEventListener('blur',function(){
     def _on_map_station_click(self, data):
         if self._pota_scan_active:
             self._stop_pota_scan()
+        if self._scan_paused_by_map:
+            return
         if data.get("tuned"):
             return
         try:
@@ -3572,6 +3619,10 @@ document.getElementById('lm-call').addEventListener('blur',function(){
     def _pota_scan_step(self):
         if not self._pota_scan_active:
             return
+        interval_ms = max(5, min(60, self._pota_scan_interval.get())) * 1_000
+        if self._flrig_ptt or self._scan_paused_by_map:
+            self._pota_scan_after_id = self.after(interval_ms, self._pota_scan_step)
+            return
         children = self._pota_tree.get_children()
         if not children:
             self._stop_pota_scan()
@@ -3596,7 +3647,6 @@ document.getElementById('lm-call').addEventListener('blur',function(){
         self._pota_tree.see(iid)
         self._pota_scan_idx += 1
         self._refresh_map()
-        interval_ms = max(5, min(60, self._pota_scan_interval.get())) * 1_000
         self._pota_scan_after_id = self.after(interval_ms, self._pota_scan_step)
 
     # ── Entry form ────────────────────────────────────────────────────────
@@ -4353,6 +4403,7 @@ document.getElementById('lm-call').addEventListener('blur',function(){
     def _update_vfo_display(self, freq_hz, mode, force=False,
                             smeter=None, pwrmeter=None, ptt=False):
         suppressed = not force and time.monotonic() < self._tune_suppress_until
+        self._flrig_ptt = bool(ptt)
         if freq_hz is not None:
             if not suppressed:
                 self._flrig_freq_hz = freq_hz
