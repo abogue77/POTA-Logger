@@ -35,7 +35,9 @@ Click a row to:
 | Row color | Meaning |
 |-----------|---------|
 | Normal | Unworked activator |
-| Highlighted | Activator already logged in this session |
+| Highlighted Green| Activator already logged in this session |
+| Highlighted Blue| Radio (Flrig) tuned to activator |
+
 
 ---
 
