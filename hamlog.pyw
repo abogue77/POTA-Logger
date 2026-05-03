@@ -34,7 +34,12 @@ LOGBOOK_DIR = os.path.join(os.path.expanduser("~"), "HamLog")
 os.makedirs(LOGBOOK_DIR, exist_ok=True)
 CONFIG_FILE   = os.path.join(LOGBOOK_DIR, "config.json")
 PARKS_DB      = os.path.join(LOGBOOK_DIR, "pota_parks.db")
+FCC_DB        = os.path.join(LOGBOOK_DIR, "fcc_calls.db")
 PARKS_CSV_URL = "https://pota.app/all_parks_ext.csv"
+FCC_ZIP_URLS  = [
+    "https://data.fcc.gov/download/pub/uls/complete/l_amat.zip",   # official
+    "http://www.nc7j.com/downloads/AR6/fcc/complete/l_amat.zip",   # community mirror
+]
 
 # ── Config ────────────────────────────────────────────────────────────────────
 DEFAULT_CONFIG = {
@@ -55,6 +60,7 @@ DEFAULT_CONFIG = {
     "pota_respot_enabled":    False,
     "pota_scan_skip_worked":  False,
     "pota_scan_interval":     15,
+    "fcc_db_date":            "",
 }
 
 def load_config():
@@ -225,6 +231,156 @@ def lookup_park(reference):
         return dict(row) if row else None
     except Exception:
         return None
+
+# ── FCC Callsign DB ───────────────────────────────────────────────────────────
+def fcc_db_exists():
+    if not os.path.exists(FCC_DB):
+        return False
+    try:
+        with sqlite3.connect(FCC_DB) as cx:
+            n = cx.execute("SELECT COUNT(*) FROM callsigns").fetchone()[0]
+        return n > 0
+    except Exception:
+        return False
+
+def build_fcc_db(progress_cb=None):
+    """Download l_amat.zip from FCC and build ~/HamLog/fcc_calls.db.
+    Returns (count, error_string). Runs in a background thread; progress_cb is thread-safe."""
+    import zipfile, io as _io
+    if progress_cb:
+        progress_cb("Connecting to FCC database server…")
+    raw = None
+    last_err = ""
+    for url in FCC_ZIP_URLS:
+        source = "FCC" if "fcc.gov" in url else "mirror"
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "POTA-Hunter/2.0"})
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                total = int(resp.headers.get("Content-Length") or 0)
+                chunks = []
+                received = 0
+                while True:
+                    chunk = resp.read(65536)
+                    if not chunk:
+                        break
+                    chunks.append(chunk)
+                    received += len(chunk)
+                    if progress_cb:
+                        if total:
+                            pct = received * 100 // total
+                            progress_cb(
+                                f"Downloading FCC database ({source})…  "
+                                f"{received/1_048_576:.1f} / {total/1_048_576:.1f} MB  ({pct}%)")
+                        else:
+                            progress_cb(
+                                f"Downloading FCC database ({source})…  "
+                                f"{received/1_048_576:.1f} MB received")
+            raw = b"".join(chunks)
+            break  # success
+        except Exception as e:
+            last_err = str(e)
+            if progress_cb:
+                progress_cb(f"{source} unavailable ({e}) — trying next source…")
+    if raw is None:
+        return 0, f"Download failed from all sources: {last_err}"
+
+    if progress_cb:
+        progress_cb("Parsing FCC data files…")
+    try:
+        zf = zipfile.ZipFile(_io.BytesIO(raw))
+
+        # HD.dat: pipe-delimited, field[4]=callsign, field[5]=status (A=Active)
+        active = set()
+        with zf.open("HD.dat") as f:
+            for line in f:
+                parts = line.decode("latin-1").rstrip("\r\n").split("|")
+                if len(parts) > 5 and parts[5] == "A":
+                    active.add(parts[4].upper())
+
+        # AM.dat: pipe-delimited, field[4]=callsign, field[5]=operator class (E/G/A/T/N/P)
+        classes = {}
+        with zf.open("AM.dat") as f:
+            for line in f:
+                parts = line.decode("latin-1").rstrip("\r\n").split("|")
+                if len(parts) > 5 and parts[4]:
+                    classes[parts[4].upper()] = parts[5]
+
+        # EN.dat: pipe-delimited, field[4]=callsign, [7]=entity name (clubs),
+        #         [8]=first, [10]=last, [15]=addr, [16]=city, [17]=state, [18]=zip
+        rows = []
+        with zf.open("EN.dat") as f:
+            for line in f:
+                parts = line.decode("latin-1").rstrip("\r\n").split("|")
+                if len(parts) < 19:
+                    continue
+                call = parts[4].upper()
+                if not call or call not in active:
+                    continue
+                first  = parts[8].strip()
+                last   = parts[10].strip()
+                entity = parts[7].strip()
+                if not first and not last and entity:
+                    first = entity
+                rows.append((
+                    call,
+                    first,
+                    last,
+                    parts[15].strip(),
+                    parts[16].strip(),
+                    parts[17].strip(),
+                    parts[18].strip(),
+                    classes.get(call, ""),
+                ))
+    except Exception as e:
+        return 0, f"Parse failed: {e}"
+
+    if not rows:
+        return 0, "No active licensee records found in FCC data."
+
+    if progress_cb:
+        progress_cb(f"Writing {len(rows):,} callsigns to DB…")
+    try:
+        with sqlite3.connect(FCC_DB) as cx:
+            cx.execute("DROP TABLE IF EXISTS callsigns")
+            cx.execute("""
+                CREATE TABLE callsigns (
+                    call       TEXT PRIMARY KEY,
+                    first_name TEXT,
+                    last_name  TEXT,
+                    addr1      TEXT,
+                    city       TEXT,
+                    state      TEXT,
+                    zip        TEXT,
+                    lic_class  TEXT
+                )
+            """)
+            cx.execute("CREATE INDEX IF NOT EXISTS idx_fcc_call ON callsigns(call)")
+            cx.executemany("INSERT OR REPLACE INTO callsigns VALUES (?,?,?,?,?,?,?,?)", rows)
+    except Exception as e:
+        return 0, f"DB write failed: {e}"
+
+    if progress_cb:
+        progress_cb(f"FCC database ready — {len(rows):,} callsigns.")
+    return len(rows), None
+
+def fcc_lookup(call):
+    """Look up a callsign in the local FCC database. Thread-safe."""
+    if not os.path.exists(FCC_DB):
+        return None
+    try:
+        with sqlite3.connect(FCC_DB) as cx:
+            row = cx.execute(
+                "SELECT first_name,last_name,addr1,city,state,lic_class "
+                "FROM callsigns WHERE call=?",
+                (call.upper(),)).fetchone()
+    except Exception:
+        return None
+    if not row:
+        return None
+    fn, ln, addr, city, state, cls = row
+    name = f"{fn} {ln}".strip()
+    qth  = f"{city}, {state}".strip(", ")
+    return {"name": name, "qth": qth, "class": cls, "source": "FCC"}
 
 # ── ADIF helpers ──────────────────────────────────────────────────────────────
 def adif_field(tag, val):
@@ -468,6 +624,31 @@ def qrz_lookup(call):
         return {"name": f"{g('fname')} {g('name')}".strip(),
                 "qth":  f"{g('addr2')}, {g('country')}".strip(", "),
                 "grid": g("grid")}
+    except Exception:
+        return None
+
+def hamdb_lookup(call):
+    """Look up a callsign via the free HamDB.org API. No auth required."""
+    url = f"http://api.hamdb.org/{urllib.parse.quote(call.upper())}/json/POTA-Hunter"
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "POTA-Hunter/2.0"})
+        with urllib.request.urlopen(req, timeout=8) as r:
+            data = json.loads(r.read())["hamdb"]["callsign"]
+        if data.get("call", "").upper() == "NOT_FOUND":
+            return None
+        fname = data.get("fname", "")
+        lname = data.get("name", "")
+        name  = f"{fname} {lname}".strip()
+        city  = data.get("addr2", "")
+        state = data.get("state", "")
+        qth   = f"{city}, {state}".strip(", ")
+        return {
+            "name":   name,
+            "qth":    qth,
+            "grid":   data.get("grid", ""),
+            "class":  data.get("class", ""),
+            "source": "HamDB",
+        }
     except Exception:
         return None
 
@@ -1146,6 +1327,7 @@ class POTAHunter(tk.Tk):
 
         self._start_flrig_poll()
         self.after(1500, self._check_parks_db_on_startup)
+        self.after(2000, self._check_fcc_db_on_startup)
 
     # ── TTK style ─────────────────────────────────────────────────────────
     def _style_ttk(self):
@@ -1201,6 +1383,10 @@ class POTAHunter(tk.Tk):
         sm.add_command(label="Save Filter Settings", command=self._save_filter_settings)
         sm.add_separator()
         sm.add_command(label="Update POTA Parks DB…", command=self._update_parks_db)
+        fcc_date = self.cfg.get("fcc_db_date", "")
+        fcc_label = (f"Update FCC Callsign DB… (last: {fcc_date})"
+                     if fcc_date else "Download FCC Callsign DB…")
+        sm.add_command(label=fcc_label, command=self._update_fcc_db)
         sm.add_separator()
         theme_label = ("☀ Switch to Light Mode"
                        if self.cfg.get("theme", "dark") == "dark"
@@ -2394,6 +2580,8 @@ function openLogModal(spot){
   document.getElementById('lm-selfspot-btn').style.display=_activatorMode?'':'none';
   var freqEl=document.getElementById('lm-freq');
   var modeEl=document.getElementById('lm-mode');
+  document.getElementById('lm-name').value='';
+  document.getElementById('lm-qth').value='';
   if(_activatorMode){
     document.getElementById('lm-call').value='';
     document.getElementById('lm-park').value='';
@@ -2406,13 +2594,15 @@ function openLogModal(spot){
   }else{
     var s=spot||_tunedSpot;
     if(!s)return;
-    document.getElementById('lm-call').value=s.activator||'';
+    var preCall=s.activator||'';
+    document.getElementById('lm-call').value=preCall;
     document.getElementById('lm-park').value=s.park||'';
     freqEl.value=s.freq_khz?String(s.freq_khz):'';
     modeEl.value=s.mode||'';
     document.getElementById('lm-grid').value=s.gs||'';
     freqEl.setAttribute('readonly','');
     modeEl.setAttribute('readonly','');
+    if(preCall){lmLookupCall(preCall);}
   }
   document.getElementById('lm-rst-s').value='59';
   document.getElementById('lm-rst-r').value='59';
@@ -2431,6 +2621,8 @@ function submitLogQSO(){
   if(!call){st.textContent='CALLSIGN REQUIRED';st.className='err';return;}
   var payload={
     call:call,
+    name:document.getElementById('lm-name').value.trim(),
+    qth:document.getElementById('lm-qth').value.trim(),
     park:document.getElementById('lm-park').value.trim(),
     freq_khz:parseFloat(document.getElementById('lm-freq').value)||0,
     mode:document.getElementById('lm-mode').value.trim().toUpperCase(),
@@ -2450,6 +2642,8 @@ function submitLogQSO(){
         if(_activatorMode){
           setTimeout(function(){
             document.getElementById('lm-call').value='';
+            document.getElementById('lm-name').value='';
+            document.getElementById('lm-qth').value='';
             document.getElementById('lm-park').value='';
             document.getElementById('lm-rst-s').value='59';
             document.getElementById('lm-rst-r').value='59';
@@ -2467,6 +2661,18 @@ document.getElementById('scan-btn').addEventListener('click',function(e){e.stopP
 document.getElementById('radar-btn').addEventListener('click',function(e){e.stopPropagation();if(radarEnabled){disableRadar();}else{enableRadar();}});
 document.addEventListener('keydown',function(e){if(e.key==='Escape'){closeLogModal();}});
 document.getElementById('log-modal-overlay').addEventListener('click',function(e){if(e.target===this){closeLogModal();}});
+function lmLookupCall(call){
+  if(!call)return;
+  fetch('/lookup?call='+encodeURIComponent(call))
+    .then(function(r){return r.json();})
+    .then(function(d){
+      var ne=document.getElementById('lm-name');
+      var qe=document.getElementById('lm-qth');
+      if(d.name&&!ne.value.trim())ne.value=d.name;
+      if(d.qth&&!qe.value.trim())qe.value=d.qth;
+    }).catch(function(){});}
+document.getElementById('lm-call').addEventListener('blur',function(){
+  lmLookupCall(this.value.trim().toUpperCase());});
 </script>
 <div id="log-modal-overlay">
   <div id="log-modal">
@@ -2474,6 +2680,14 @@ document.getElementById('log-modal-overlay').addEventListener('click',function(e
     <div class="lm-row">
       <div class="lm-label">Callsign</div>
       <input class="lm-input" id="lm-call" type="text" autocomplete="off" spellcheck="false">
+    </div>
+    <div class="lm-row">
+      <div class="lm-label">Name</div>
+      <input class="lm-input" id="lm-name" type="text" autocomplete="off" placeholder="Auto-filled">
+    </div>
+    <div class="lm-row">
+      <div class="lm-label">City / State</div>
+      <input class="lm-input" id="lm-qth" type="text" autocomplete="off" placeholder="Auto-filled">
     </div>
     <div class="lm-row">
       <div class="lm-label">Park Reference</div>
@@ -2531,12 +2745,23 @@ document.getElementById('log-modal-overlay').addEventListener('click',function(e
                 self.wfile.write(body)
 
             def do_GET(self):
-                if self.path == '/data':
+                parsed = urllib.parse.urlparse(self.path)
+                params = urllib.parse.parse_qs(parsed.query)
+                if parsed.path == '/data':
                     self._handle_data()
-                elif self.path == '/debug':
+                elif parsed.path == '/debug':
                     self._handle_debug()
-                elif self.path == '/radar':
+                elif parsed.path == '/radar':
                     self._handle_radar()
+                elif parsed.path == '/lookup':
+                    call = params.get("call", [""])[0].strip().upper()
+                    info = {}
+                    if call:
+                        result = (fcc_lookup(call) or hamdb_lookup(call)
+                                  or qrz_lookup(call))
+                        if result:
+                            info = result
+                    self._send_json(info)
                 else:
                     body = MAP_HTML.encode()
                     self.send_response(200)
@@ -3054,6 +3279,9 @@ document.getElementById('log-modal-overlay').addEventListener('click',function(e
         # Populate QSO entry fields
         self.e_call.delete(0, "end")
         self.e_call.insert(0, activator.upper())
+        self.e_name.delete(0, "end")
+        self.e_qth.delete(0, "end")
+        self._qrz_info_lbl.config(text="")
         self.e_park.delete(0, "end")
         self.e_park.insert(0, park)
 
@@ -3302,8 +3530,9 @@ document.getElementById('log-modal-overlay').addEventListener('click',function(e
         f = tk.Frame(parent, bg=BG)
         f.pack(fill="x", padx=10, pady=(8,4))
 
-        labels = ["Callsign *", "RST Sent", "RST Rcvd", "Park #", "Grid", "Comments", "Notes"]
-        col_weights = [0, 0, 0, 0, 0, 1, 1]
+        labels      = ["Callsign *", "Name", "City / State", "RST Sent", "RST Rcvd",
+                       "Park #", "Grid", "Comments", "Notes"]
+        col_weights = [0, 0, 0, 0, 0, 0, 0, 1, 1]
         for i, (text, wt) in enumerate(zip(labels, col_weights)):
             tk.Label(f, text=text, **lbl_kw).grid(
                 row=0, column=i, sticky="w",
@@ -3316,32 +3545,40 @@ document.getElementById('log-modal-overlay').addEventListener('click',function(e
         self.e_call.bind("<Return>",   self._log_qso)
         self.e_call.grid(row=1, column=0, padx=(0,4), sticky="w")
 
+        self.e_name = tk.Entry(f, width=18, **ent)
+        self.e_name.bind("<Return>", self._log_qso)
+        self.e_name.grid(row=1, column=1, padx=(10,4), sticky="w")
+
+        self.e_qth = tk.Entry(f, width=15, **ent)
+        self.e_qth.bind("<Return>", self._log_qso)
+        self.e_qth.grid(row=1, column=2, padx=(10,4), sticky="w")
+
         self.e_rst_s = tk.Entry(f, width=5, **ent)
         self.e_rst_s.insert(0,"59")
         self.e_rst_s.bind("<Return>", self._log_qso)
-        self.e_rst_s.grid(row=1, column=1, padx=(10,4), sticky="w")
+        self.e_rst_s.grid(row=1, column=3, padx=(10,4), sticky="w")
 
         self.e_rst_r = tk.Entry(f, width=5, **ent)
         self.e_rst_r.insert(0,"59")
         self.e_rst_r.bind("<Return>", self._log_qso)
-        self.e_rst_r.grid(row=1, column=2, padx=(10,4), sticky="w")
+        self.e_rst_r.grid(row=1, column=4, padx=(10,4), sticky="w")
 
         self.e_park = tk.Entry(f, width=11, **ent)
         self.e_park.bind("<Return>",   self._log_qso)
         self.e_park.bind("<FocusOut>", self._on_park_focusout)
-        self.e_park.grid(row=1, column=3, padx=(10,4), sticky="w")
+        self.e_park.grid(row=1, column=5, padx=(10,4), sticky="w")
 
         self.e_grid = tk.Entry(f, width=7, **ent)
         self.e_grid.bind("<Return>", self._log_qso)
-        self.e_grid.grid(row=1, column=4, padx=(10,4), sticky="w")
+        self.e_grid.grid(row=1, column=6, padx=(10,4), sticky="w")
 
         self.e_comment = tk.Entry(f, width=22, **ent)
         self.e_comment.bind("<Return>", self._log_qso)
-        self.e_comment.grid(row=1, column=5, padx=(10,4), sticky="ew")
+        self.e_comment.grid(row=1, column=7, padx=(10,4), sticky="ew")
 
         self.e_notes = tk.Entry(f, width=22, **ent)
         self.e_notes.bind("<Return>", self._log_qso)
-        self.e_notes.grid(row=1, column=6, padx=(10,4), sticky="ew")
+        self.e_notes.grid(row=1, column=8, padx=(10,4), sticky="ew")
 
         info_row = tk.Frame(parent, bg=BG)
         info_row.pack(fill="x", padx=10, pady=(2,0))
@@ -3385,20 +3622,58 @@ document.getElementById('log-modal-overlay').addEventListener('click',function(e
             return
         self.e_call.delete(0,"end")
         self.e_call.insert(0, call)
-        if _qrz_session:
-            threading.Thread(target=self._qrz_lookup_bg,
-                             args=(call,), daemon=True).start()
+        self._qrz_info_lbl.config(text="")
+        threading.Thread(target=self._qrz_lookup_bg,
+                         args=(call,), daemon=True).start()
 
     def _qrz_lookup_bg(self, call):
-        info = qrz_lookup(call)
+        # Tier 1: local FCC database (instant, offline, US callsigns)
+        info = fcc_lookup(call)
+        # Tier 2: HamDB free API (non-US callsigns, or FCC DB not built yet)
+        if not info:
+            info = hamdb_lookup(call)
+        # Tier 3: QRZ (requires subscription, broadest coverage)
+        if not info:
+            qrz = qrz_lookup(call)
+            if qrz:
+                qrz["source"] = "QRZ"
+                info = qrz
+        # If FCC found it but has no grid, try HamDB for the grid square
+        if info and info.get("source") == "FCC" and not info.get("grid"):
+            hdb = hamdb_lookup(call)
+            if hdb and hdb.get("grid"):
+                info["grid"] = hdb["grid"]
         if info:
             self.after(0, lambda: self._apply_qrz_info(info))
 
     def _apply_qrz_info(self, info):
-        parts = [v for v in (info.get("name",""), info.get("qth",""),
-                              info.get("grid","")) if v]
+        source = info.get("source", "")
+        name   = info.get("name", "")
+        qth    = info.get("qth", "")
+        grid   = info.get("grid", "")
+        cls    = info.get("class", "")
+        CLASS_FULL = {"E": "Extra", "A": "Advanced", "G": "General",
+                      "T": "Technician", "N": "Novice", "P": "Tech+"}
+        cls_str = CLASS_FULL.get(cls, cls)
+        parts = []
+        if name:
+            parts.append(f"{name} ({cls_str})" if cls_str else name)
+        if qth:
+            parts.append(qth)
+        if grid:
+            parts.append(grid)
+        prefix = f"[{source}] " if source else ""
         self._qrz_info_lbl.config(
-            text=("QRZ: " + "  ".join(parts)) if parts else "")
+            text=(prefix + "  ".join(parts)) if parts else "")
+        if name and not self.e_name.get().strip():
+            self.e_name.delete(0, "end")
+            self.e_name.insert(0, name)
+        if qth and not self.e_qth.get().strip():
+            self.e_qth.delete(0, "end")
+            self.e_qth.insert(0, qth)
+        if grid and not self.e_grid.get().strip():
+            self.e_grid.delete(0, "end")
+            self.e_grid.insert(0, grid[:4])
 
     def _on_park_focusout(self, _=None):
         ref = self.e_park.get().strip().upper()
@@ -3435,7 +3710,8 @@ document.getElementById('log-modal-overlay').addEventListener('click',function(e
         self._park_info_lbl.config(text=label, fg=ACC3)
 
     def _clear_form(self):
-        for w in (self.e_call, self.e_park, self.e_grid, self.e_comment, self.e_notes):
+        for w in (self.e_call, self.e_name, self.e_qth, self.e_park, self.e_grid,
+                  self.e_comment, self.e_notes):
             w.delete(0,"end")
         self.e_rst_s.delete(0,"end"); self.e_rst_s.insert(0,"59")
         self.e_rst_r.delete(0,"end"); self.e_rst_r.insert(0,"59")
@@ -3512,8 +3788,8 @@ document.getElementById('log-modal-overlay').addEventListener('click',function(e
             "mode":       mode,
             "rst_sent":   self.e_rst_s.get().strip() or "59",
             "rst_rcvd":   self.e_rst_r.get().strip() or "59",
-            "name":       "",
-            "qth":        "",
+            "name":       self.e_name.get().strip(),
+            "qth":        self.e_qth.get().strip(),
             "gridsquare": self.e_grid.get().strip().upper(),
             "park_nr":    self.e_park.get().strip(),
             "comment":    self.e_comment.get().strip(),
@@ -3572,8 +3848,8 @@ document.getElementById('log-modal-overlay').addEventListener('click',function(e
             "mode":       mode,
             "rst_sent":   str(data.get("rst_sent", "59")).strip() or "59",
             "rst_rcvd":   str(data.get("rst_rcvd", "59")).strip() or "59",
-            "name":       "",
-            "qth":        "",
+            "name":       str(data.get("name", "")).strip(),
+            "qth":        str(data.get("qth", "")).strip(),
             "gridsquare": str(data.get("gridsquare", "")).strip().upper(),
             "park_nr":    str(data.get("park", "")).strip(),
             "comment":    str(data.get("comment", "")).strip(),
@@ -3856,6 +4132,42 @@ document.getElementById('log-modal-overlay').addEventListener('click',function(e
 
         threading.Thread(target=_worker, daemon=True).start()
 
+    def _update_fcc_db(self):
+        fcc_date = self.cfg.get("fcc_db_date", "")
+        action   = "re-download and update" if fcc_date else "download"
+        if not messagebox.askyesno(
+                "FCC Callsign Database",
+                f"This will {action} the FCC amateur radio license database\n"
+                "from data.fcc.gov (~175 MB download).\n\n"
+                "After building, callsigns will auto-populate name, city,\n"
+                "state, and license class when you tab out of the callsign field.\n\n"
+                f"Destination: {FCC_DB}\n\nContinue?"):
+            return
+        self._set_status("Downloading FCC callsign database…")
+
+        def _progress(msg):
+            self.after(0, lambda: self._set_status(msg))
+
+        def _worker():
+            count, err = build_fcc_db(progress_cb=_progress)
+            if err:
+                self.after(0, lambda: (
+                    messagebox.showerror("FCC DB Error", err),
+                    self._set_status(f"FCC DB update failed: {err}")))
+            else:
+                today = datetime.date.today().isoformat()
+                self.cfg["fcc_db_date"] = today
+                save_config(self.cfg)
+                self.after(0, lambda: (
+                    messagebox.showinfo(
+                        "FCC Database Ready",
+                        f"Downloaded and indexed {count:,} US amateur callsigns.\n"
+                        f"Saved to: {FCC_DB}"),
+                    self._set_status(
+                        f"FCC callsign DB updated — {count:,} callsigns.")))
+
+        threading.Thread(target=_worker, daemon=True).start()
+
     def _check_parks_db_on_startup(self):
         if parks_db_exists():
             return
@@ -3865,6 +4177,19 @@ document.getElementById('log-modal-overlay').addEventListener('click',function(e
                 "Download it now? (~1 MB, runs in background)\n"
                 f"Will be saved to: {PARKS_DB}"):
             self._update_parks_db()
+
+    def _check_fcc_db_on_startup(self):
+        fcc_date = self.cfg.get("fcc_db_date", "")
+        if fcc_date:
+            try:
+                built = datetime.date.fromisoformat(fcc_date)
+                age   = (datetime.date.today() - built).days
+                if age > 30:
+                    self._set_status(
+                        f"FCC callsign DB is {age} days old — "
+                        "consider updating via Settings > Update FCC Callsign DB…")
+            except ValueError:
+                pass
 
     def _switch_theme(self):
         current = self.cfg.get("theme", "dark")
