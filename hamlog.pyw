@@ -54,6 +54,7 @@ DEFAULT_CONFIG = {
     "pota_band":              "All",
     "pota_mode":              "All",
     "pota_hide_qrt":          False,
+    "pota_hide_oob":          False,
     "pota_itu_r1":            True,
     "pota_itu_r2":            True,
     "pota_itu_r3":            True,
@@ -61,6 +62,7 @@ DEFAULT_CONFIG = {
     "pota_scan_skip_worked":  False,
     "pota_scan_interval":     15,
     "fcc_db_date":            "",
+    "license_class":          "Extra",
 }
 
 def load_config():
@@ -508,6 +510,37 @@ def freq_to_band(freq_mhz):
         if lo <= f <= hi:
             return band
     return ""
+
+# ── US Amateur Band Plan (FCC Part 97, MHz) ───────────────────────────────────
+# Phone/SSB/AM/FM sub-band privileges by license class
+_US_PHONE_BANDS = {
+    "Extra":      [(1.800,2.000),(3.600,4.000),(5.3305,5.4035),(7.125,7.300),
+                   (14.150,14.350),(18.110,18.168),(21.200,21.450),(24.930,24.990),
+                   (28.000,29.700),(50.0,54.0),(144.0,148.0),(420.0,450.0)],
+    "General":    [(1.843,2.000),(3.800,4.000),(5.3305,5.4035),(7.175,7.300),
+                   (14.225,14.350),(18.110,18.168),(21.275,21.450),(24.930,24.990),
+                   (28.300,29.700),(50.0,54.0),(144.0,148.0),(420.0,450.0)],
+    "Technician": [(28.300,29.700),(50.0,54.0),(144.0,148.0),(420.0,450.0)],
+}
+# CW/digital sub-band privileges (broader than phone)
+_US_CW_BANDS = {
+    "Extra":      [(1.800,2.000),(3.500,4.000),(5.3305,5.4035),(7.000,7.300),
+                   (10.100,10.150),(14.000,14.350),(18.068,18.168),(21.000,21.450),
+                   (24.890,24.990),(28.000,29.700),(50.0,54.0),(144.0,148.0),(420.0,450.0)],
+    "General":    [(1.800,2.000),(3.525,4.000),(5.3305,5.4035),(7.025,7.300),
+                   (10.100,10.150),(14.025,14.350),(18.068,18.168),(21.025,21.450),
+                   (24.890,24.990),(28.000,29.700),(50.0,54.0),(144.0,148.0),(420.0,450.0)],
+    "Technician": [(3.525,3.600),(7.025,7.125),(21.025,21.200),(28.000,29.700),
+                   (50.0,54.0),(144.0,148.0),(420.0,450.0)],
+}
+_PHONE_MODES = {"SSB","USB","LSB","AM","FM","FMN","PHONE"}
+
+def _in_band(freq_mhz, license_class, mode=""):
+    plan = _US_PHONE_BANDS if mode.strip().upper() in _PHONE_MODES else _US_CW_BANDS
+    ranges = plan.get(license_class)
+    if not ranges:
+        return True
+    return any(lo <= freq_mhz <= hi for lo, hi in ranges)
 
 # ── Flrig ─────────────────────────────────────────────────────────────────────
 class _TimeoutTransport(xmlrpc.client.Transport):
@@ -1275,6 +1308,7 @@ class POTAHunter(tk.Tk):
         self._pota_band_var  = tk.StringVar(value=self.cfg.get("pota_band", "All"))
         self._pota_mode_var  = tk.StringVar(value=self.cfg.get("pota_mode", "All"))
         self._pota_hide_qrt  = tk.BooleanVar(value=self.cfg.get("pota_hide_qrt", False))
+        self._pota_hide_oob  = tk.BooleanVar(value=self.cfg.get("pota_hide_oob", False))
         self._pota_itu_r1    = tk.BooleanVar(value=self.cfg.get("pota_itu_r1", True))
         self._pota_itu_r2    = tk.BooleanVar(value=self.cfg.get("pota_itu_r2", True))
         self._pota_itu_r3    = tk.BooleanVar(value=self.cfg.get("pota_itu_r3", True))
@@ -2134,7 +2168,7 @@ header::after{content:'';position:absolute;inset:0;pointer-events:none;backgroun
 .beam-anim{animation:beam-flow 0.9s linear infinite;}
 @keyframes beam-flow{to{stroke-dashoffset:-20;}}
 @keyframes spot-flash{0%,100%{opacity:1}50%{opacity:0.1}}
-.spot-flash{animation:spot-flash 1.5s ease-in-out infinite;}
+.spot-flash{animation:spot-flash 2.5s ease-in-out infinite;}
 ::-webkit-scrollbar{width:3px;}
 ::-webkit-scrollbar-thumb{background:var(--red-dim);}
 #scan-btn{cursor:pointer;font-family:'Orbitron',sans-serif;font-size:.6rem;letter-spacing:2px;padding:4px 12px;border:1px solid currentColor;transition:all .2s;user-select:none;}
@@ -2143,11 +2177,15 @@ header::after{content:'';position:absolute;inset:0;pointer-events:none;backgroun
 #scan-overlay{position:absolute;top:8px;left:50%;transform:translateX(-50%);z-index:1000;font-family:'Orbitron',sans-serif;font-size:.85rem;letter-spacing:4px;color:#00e5ff;text-shadow:0 0 12px #00e5ff;background:rgba(3,6,9,.8);padding:4px 18px;border:1px solid #00e5ff;pointer-events:none;display:none;white-space:nowrap;}
 #scan-dots{display:inline-block;width:2ch;text-align:left;}
 .stn-box{border:1px solid;padding:7px 10px;margin-top:3px;flex-shrink:0;}
-.stn-box.logged{border-color:#00ff88;background:rgba(0,255,136,.04);}
-.stn-box.tuned-s{border-color:#00e5ff;background:rgba(0,229,255,.04);}
+.stn-box.logged{border-color:var(--green);background:rgba(0,255,136,.04);}
+.stn-box.tuned-s{border-color:var(--cyan);background:rgba(0,229,255,.04);}
 .stn-call{font-family:'Orbitron',sans-serif;font-size:.72rem;letter-spacing:1px;}
-.stn-call.logged{color:#00ff88;text-shadow:0 0 6px rgba(0,255,136,.4);}
-.stn-call.tuned-s{color:#00e5ff;text-shadow:0 0 6px rgba(0,229,255,.4);}
+.stn-call.logged{color:var(--green);text-shadow:0 0 6px rgba(0,255,136,.4);}
+.stn-call.tuned-s{color:var(--cyan);text-shadow:0 0 6px rgba(0,229,255,.4);}
+.day-mode .stn-box.logged{background:rgba(0,77,34,.08);}
+.day-mode .stn-call.logged{text-shadow:none;}
+.day-mode .stn-box.tuned-s{background:rgba(0,61,119,.08);}
+.day-mode .stn-call.tuned-s{text-shadow:none;}
 .stn-detail{font-size:.56rem;color:var(--dim);margin-top:3px;line-height:1.7;}
 .stn-detail span{display:block;}
 #radar-btn{cursor:pointer;font-family:'Orbitron',sans-serif;font-size:.6rem;letter-spacing:2px;padding:4px 12px;border:1px solid currentColor;transition:all .2s;user-select:none;margin-left:8px;}
@@ -2193,6 +2231,7 @@ header::after{content:'';position:absolute;inset:0;pointer-events:none;backgroun
 #ts-log-btn:hover{background:rgba(0,229,255,.1);box-shadow:0 0 8px rgba(0,229,255,.15);}
 .stn-box.tuned-s{cursor:pointer;}
 .stn-box.tuned-s:hover{background:rgba(0,229,255,.08);box-shadow:0 0 8px rgba(0,229,255,.1);}
+.day-mode .stn-box.tuned-s:hover{background:rgba(0,61,119,.12);box-shadow:0 0 8px rgba(0,61,119,.2);}
 .spot-item .spot-dbl-hint{font-size:.48rem;color:var(--dim);letter-spacing:1px;
   margin-top:2px;opacity:0;transition:opacity .2s;}
 .spot-item:hover .spot-dbl-hint{opacity:1;}
@@ -2290,6 +2329,9 @@ header::after{content:'';position:absolute;inset:0;pointer-events:none;backgroun
   </div>
   <div class="map-area">
     <div id="scan-overlay">SCANNING<span id="scan-dots">.</span></div>
+    <div id="oob-overlay" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.6);align-items:center;justify-content:center;">
+      <div style="font-family:'Orbitron',sans-serif;font-size:2rem;letter-spacing:6px;color:#ff2020;text-shadow:0 0 30px #ff2020;border:2px solid #ff2020;padding:24px 48px;background:rgba(3,6,9,.95);">&#9888; OUT OF BAND</div>
+    </div>
     <div id="map"></div>
   </div>
   <div class="panel right">
@@ -2433,7 +2475,10 @@ function updateSpotsPanel(d){
     var s=spots[i];
     item.addEventListener('click',function(){
       fetch('/tune',{method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({activator:s.activator,park:s.park,freq_khz:s.freq_khz,mode:s.mode,tuned:s.tuned})});
+        body:JSON.stringify({activator:s.activator,park:s.park,freq_khz:s.freq_khz,mode:s.mode,tuned:s.tuned})})
+        .then(function(r){return r.json();}).then(function(d){
+          if(d.out_of_band){var ov=document.getElementById('oob-overlay');
+            ov.style.display='flex';setTimeout(function(){ov.style.display='none';},4000);}});
     });
     item.addEventListener('dblclick',function(e){
       e.stopPropagation();
@@ -2443,7 +2488,7 @@ function refreshData(){
   fetch('/data').then(function(r){return r.json();}).then(function(d){
     clearMarkers();
     (d.qsos||[]).forEach(function(q){
-      var m=L.circleMarker([q.lat,q.lon],{radius:6,color:'#cc44ff',fillColor:'#cc44ff',fillOpacity:0.7,weight:1});
+      var m=L.circleMarker([q.lat,q.lon],{radius:5,color:'#cc44ff',fillColor:'#cc44ff',fillOpacity:0.7,weight:1});
       var pop='<b>'+q.call+'</b>';
       if(q.park)pop+=' ['+q.park+']';
       if(q.band||q.mode)pop+='<br>'+[q.band,q.mode].filter(Boolean).join(' ');
@@ -2451,7 +2496,7 @@ function refreshData(){
       m.bindPopup(pop);m.addTo(map);markers.push(m);});
     (d.spots||[]).forEach(function(s){
       var color=s.tuned?'#00e5ff':s.worked?'#00bb44':(_dayMode?'#000000':'#ffff00');
-      var r=s.tuned?9:7;
+      var r=s.tuned?7:5;
       var cls=(!s.tuned&&!s.worked)?'spot-flash':'';
       var m=L.circleMarker([s.lat,s.lon],{radius:r,color:color,fillColor:color,fillOpacity:0.85,weight:s.tuned?2:1,className:cls});
       var pop=s.activator+' ['+s.park+']<br>'+s.freq_khz+' kHz '+s.mode;
@@ -2462,7 +2507,10 @@ function refreshData(){
       m.on('click',function(e){
         L.DomEvent.stopPropagation(e);
         fetch('/tune',{method:'POST',headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({activator:s.activator,park:s.park,freq_khz:s.freq_khz,mode:s.mode,tuned:s.tuned})});});
+          body:JSON.stringify({activator:s.activator,park:s.park,freq_khz:s.freq_khz,mode:s.mode,tuned:s.tuned})})
+          .then(function(r){return r.json();}).then(function(d){
+            if(d.out_of_band){var ov=document.getElementById('oob-overlay');
+              ov.style.display='flex';setTimeout(function(){ov.style.display='none';},4000);}});});
       m.addTo(map);markers.push(m);});
     if(d.my_grid){
       var mg=d.my_grid;
@@ -2973,8 +3021,16 @@ document.getElementById('lm-call').addEventListener('blur',function(){
                     except Exception:
                         self._send_json({"error": "bad json"}, status=400)
                         return
+                    try:
+                        freq_mhz = float(data.get("freq_khz", 0)) / 1000.0
+                    except (TypeError, ValueError):
+                        freq_mhz = 0.0
+                    lic = app.cfg.get("license_class", "Extra")
+                    oob = bool(freq_mhz) and not _in_band(freq_mhz, lic, str(data.get("mode","")))
                     app.after(0, lambda d=data: app._on_map_station_click(d))
-                    self._send_json({"ok": True})
+                    if oob:
+                        app.after(0, lambda f=freq_mhz: app._warn_out_of_band(f))
+                    self._send_json({"ok": True, "out_of_band": oob})
                 elif self.path == '/respot-self':
                     try:
                         length = int(self.headers.get('Content-Length', 0))
@@ -3105,6 +3161,9 @@ document.getElementById('lm-call').addEventListener('blur',function(){
         ttk.Checkbutton(
             tb, text="Hide QRT", variable=self._pota_hide_qrt,
             command=self._apply_pota_filters).pack(side="left", padx=(10, 0))
+        ttk.Checkbutton(
+            tb, text="Hide OOB", variable=self._pota_hide_oob,
+            command=self._apply_pota_filters).pack(side="left", padx=(6, 0))
         tk.Label(tb, text="ITU:", bg=PBGK, fg=FG2, font=SM).pack(side="left", padx=(10, 2))
         for _rgn, _var in (("R1", self._pota_itu_r1),
                             ("R2", self._pota_itu_r2),
@@ -3226,6 +3285,17 @@ document.getElementById('lm-call').addEventListener('blur',function(){
                      if "qrt" not in str(
                          s.get("comments", s.get("comment", ""))).lower()]
 
+        if self._pota_hide_oob.get():
+            lic = self.cfg.get("license_class", "Extra")
+            def _oob(s):
+                try:
+                    freq_mhz = float(s.get("frequency", s.get("freq", 0)) or 0) / 1000
+                except Exception:
+                    return False
+                mode = str(s.get("mode", ""))
+                return not _in_band(freq_mhz, lic, mode)
+            spots = [s for s in spots if not _oob(s)]
+
         sel_regions = set()
         if self._pota_itu_r1.get(): sel_regions.add(1)
         if self._pota_itu_r2.get(): sel_regions.add(2)
@@ -3305,6 +3375,13 @@ document.getElementById('lm-call').addEventListener('blur',function(){
             freq_mhz_disp = f"{freq_khz / 1000:.4f}"
         except (ValueError, TypeError):
             return
+
+        # Out-of-band check for user's license class
+        spot_mode = values[4] if len(values) > 4 else ""
+        freq_mhz = freq_khz / 1000.0
+        lic = self.cfg.get("license_class", "Extra")
+        if not _in_band(freq_mhz, lic, spot_mode):
+            self.after(0, lambda f=freq_mhz: self._warn_out_of_band(f))
 
         # Immediately highlight this row and suppress the flrig poll
         # from overwriting it before the tune command completes.
@@ -4102,6 +4179,7 @@ document.getElementById('lm-call').addEventListener('blur',function(){
         self.cfg["pota_band"]             = self._pota_band_var.get()
         self.cfg["pota_mode"]             = self._pota_mode_var.get()
         self.cfg["pota_hide_qrt"]         = self._pota_hide_qrt.get()
+        self.cfg["pota_hide_oob"]         = self._pota_hide_oob.get()
         self.cfg["pota_itu_r1"]           = self._pota_itu_r1.get()
         self.cfg["pota_itu_r2"]           = self._pota_itu_r2.get()
         self.cfg["pota_itu_r3"]           = self._pota_itu_r3.get()
@@ -4232,6 +4310,7 @@ document.getElementById('lm-call').addEventListener('blur',function(){
         self._pota_band_var  = tk.StringVar(value=self.cfg.get("pota_band", "All"))
         self._pota_mode_var  = tk.StringVar(value=self.cfg.get("pota_mode", "All"))
         self._pota_hide_qrt  = tk.BooleanVar(value=self.cfg.get("pota_hide_qrt", False))
+        self._pota_hide_oob  = tk.BooleanVar(value=self.cfg.get("pota_hide_oob", False))
         self._pota_itu_r1    = tk.BooleanVar(value=self.cfg.get("pota_itu_r1", True))
         self._pota_itu_r2    = tk.BooleanVar(value=self.cfg.get("pota_itu_r2", True))
         self._pota_itu_r3    = tk.BooleanVar(value=self.cfg.get("pota_itu_r3", True))
@@ -4349,6 +4428,13 @@ document.getElementById('lm-call').addEventListener('blur',function(){
     # ── Misc ──────────────────────────────────────────────────────────────
     def _set_status(self, msg):
         self._status_var.set(msg)
+
+    def _warn_out_of_band(self, freq_mhz):
+        lic = self.cfg.get("license_class", "?")
+        messagebox.showwarning(
+            "Out of Band",
+            f"{freq_mhz:.4f} MHz is outside your {lic} license privileges.\n\nOut of Band",
+            parent=self)
 
     def _update_mycall_lbl(self):
         call = self.cfg.get("callsign","")
@@ -4481,13 +4567,20 @@ class StationDialog(tk.Toplevel):
                 sticky="e",padx=(12,6),pady=6)
             w=tk.Entry(self,width=20,**ent); w.insert(0,cfg.get(key,""))
             w.grid(row=i,column=1,padx=(0,12),pady=6); self._entries[key]=w
-        bf=tk.Frame(self,bg=BG); bf.grid(row=2,column=0,columnspan=2,pady=10)
+        tk.Label(self,text="License Class",**lbl).grid(row=len(fields),column=0,
+            sticky="e",padx=(12,6),pady=6)
+        self._lic_cb=ttk.Combobox(self,values=["Technician","General","Extra"],
+            state="readonly",width=18,font=MONO)
+        self._lic_cb.set(cfg.get("license_class","Extra"))
+        self._lic_cb.grid(row=len(fields),column=1,padx=(0,12),pady=6)
+        bf=tk.Frame(self,bg=BG); bf.grid(row=len(fields)+1,column=0,columnspan=2,pady=10)
         bc=dict(font=SM,relief="flat",cursor="hand2",pady=4,padx=12)
         tk.Button(bf,text="✔ Save",bg=ACC3,fg=BG,command=self._save,**bc).pack(side="left",padx=6)
         tk.Button(bf,text="✕ Cancel",bg=BG3,fg=FG,command=self.destroy,**bc).pack(side="left")
     def _save(self):
         for key,w in self._entries.items():
             self.cfg[key]=w.get().strip().upper()
+        self.cfg["license_class"]=self._lic_cb.get()
         save_config(self.cfg); self.parent._update_mycall_lbl(); self.destroy()
 
 
