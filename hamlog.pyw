@@ -1271,6 +1271,7 @@ class POTAHunter(tk.Tk):
         self._pota_spots_filtered = []
         self._freq_check_var    = tk.StringVar()
         self._freq_check_border = None
+        self._freq_check_label  = None
         self._pota_band_var  = tk.StringVar(value=self.cfg.get("pota_band", "All"))
         self._pota_mode_var  = tk.StringVar(value=self.cfg.get("pota_mode", "All"))
         self._pota_hide_qrt  = tk.BooleanVar(value=self.cfg.get("pota_hide_qrt", False))
@@ -3612,6 +3613,8 @@ document.getElementById('lm-call').addEventListener('blur',function(){
         freq_entry.pack(padx=3, pady=3)
         freq_entry.bind("<Return>", lambda _: self._check_freq_conflict())
         freq_entry.bind("<KeyRelease>", lambda e: self._reset_freq_border() if e.keysym != "Return" else None)
+        self._freq_check_label = tk.Label(btn_row, text="", bg=BG, fg=FG2, font=LBL, width=5, anchor="w")
+        self._freq_check_label.pack(side="left", padx=(4, 0))
 
         self.e_call.focus_set()
 
@@ -3723,6 +3726,8 @@ document.getElementById('lm-call').addEventListener('blur',function(){
     def _reset_freq_border(self):
         if self._freq_check_border is not None:
             self._freq_check_border.config(bg=MUTED)
+        if self._freq_check_label is not None:
+            self._freq_check_label.config(text="", fg=FG2)
 
     def _check_freq_conflict(self):
         if self._freq_check_border is None:
@@ -3741,17 +3746,19 @@ document.getElementById('lm-call').addEventListener('blur',function(){
                  if s.get("frequency", s.get("freq")) not in (None, "", 0)]
         if not valid:
             self._freq_check_border.config(bg=MUTED)
+            if self._freq_check_label is not None:
+                self._freq_check_label.config(text="", fg=FG2)
             return
         min_dist = min(abs(entered_khz - f) for f in valid)
-        if min_dist < 1:
-            color = WARN    # red   — 0.0–0.9 kHz
-        elif min_dist < 2:
-            color = ACCENT  # orange — 1.0–1.9 kHz
+        if min_dist < 2:
+            color, label_text, label_fg = WARN,   "No",    WARN
         elif min_dist < 3:
-            color = YELLOW  # yellow — 2.0–2.9 kHz
+            color, label_text, label_fg = YELLOW, "Maybe", YELLOW
         else:
-            color = ACC3    # green  — 3.0+ kHz
+            color, label_text, label_fg = ACC3,   "Yes",   ACC3
         self._freq_check_border.config(bg=color)
+        if self._freq_check_label is not None:
+            self._freq_check_label.config(text=label_text, fg=label_fg)
 
     # ── Log QSO ───────────────────────────────────────────────────────────
     def _log_qso(self, _=None):
