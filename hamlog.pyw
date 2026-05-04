@@ -595,6 +595,31 @@ def flrig_set_freq(host, port, freq_hz):
     except Exception as e:
         return str(e)
 
+def ssb_mode_for_freq(freq_hz):
+    """Return 'LSB' for HF below 10 MHz, 'USB' at 10 MHz and above.
+    60m (5.3305–5.4035 MHz) is USB by FCC regulation despite being below 10 MHz."""
+    mhz = float(freq_hz) / 1_000_000
+    if 5.3305 <= mhz <= 5.4035:
+        return "USB"
+    return "USB" if mhz >= 10.0 else "LSB"
+
+def flrig_set_freq_and_mode(host, port, freq_hz, spot_mode=""):
+    """Set VFO frequency and, for SSB spots, auto-select LSB/USB.
+    Returns True on success or an error string on failure."""
+    try:
+        proxy = xmlrpc.client.ServerProxy(
+            f"http://{host}:{port}/RPC2",
+            transport=_TimeoutTransport(timeout=5.0),
+            allow_none=True)
+        proxy.rig.set_vfo(float(freq_hz))
+        norm = spot_mode.strip().upper()
+        if norm in ("SSB", "USB", "LSB", ""):
+            mode = ssb_mode_for_freq(freq_hz)
+            proxy.rig.set_mode(mode)
+        return True
+    except Exception as e:
+        return str(e)
+
 # ── POTA spot posting ─────────────────────────────────────────────────────────
 def pota_post_spot(activator, spotter, reference, freq_khz, mode, comment=""):
     import json as _json
@@ -1347,7 +1372,7 @@ class POTAHunter(tk.Tk):
         self._map_beam_id       = None
         self._map_beam_phase    = 0
         self._map_my_px         = None
-        self._map_tuned_px      = None
+        self._map_tuned_pxs     = []
 
         self._style_ttk()
         self._build_menu()
@@ -1845,7 +1870,7 @@ class POTAHunter(tk.Tk):
             self._map_marker_items[gs] = [inner]
 
         # ── Draw tuned (blue) ────────────────────────────────────────────
-        self._map_tuned_px = None
+        self._map_tuned_pxs = []
         for gs in tuned_gs:
             lat, lon = grid_to_latlon(gs)
             if lat is None:
@@ -1862,8 +1887,7 @@ class POTAHunter(tk.Tk):
                 label_parts.append(f"×{qso_info[gs]['cnt']} QSO")
             self._map_markers[(round(x), round(y))] = (
                 f"{' | '.join(label_parts)}  [{gs}]  tuned")
-            if self._map_tuned_px is None:
-                self._map_tuned_px = (x, y)
+            self._map_tuned_pxs.append((x, y))
 
         # ── User's own grid (red diamond) ───────────────────────────────
         self._map_my_px = None
@@ -1887,7 +1911,7 @@ class POTAHunter(tk.Tk):
         self._map_spot_flash_grids = active_only_gs
         if active_only_gs and not self._map_spot_flash_id:
             self._map_spot_flash_tick()
-        if self._map_my_px and self._map_tuned_px:
+        if self._map_my_px and self._map_tuned_pxs:
             self._start_map_beam()
         else:
             self._stop_map_beam()
@@ -2060,30 +2084,29 @@ class POTAHunter(tk.Tk):
         import math
         canvas = self._map_canvas
         canvas.delete("beam_line")
-        if not self._map_my_px or not self._map_tuned_px:
+        if not self._map_my_px or not self._map_tuned_pxs:
             self._map_beam_id = None
             return
         x1, y1 = self._map_my_px
-        x2, y2 = self._map_tuned_px
-        dx = x2 - x1
-        dy = y2 - y1
-        length = math.hypot(dx, dy)
-        if length < 1:
-            self._map_beam_id = None
-            return
         step = 12
         dash_len = 6
         phase_offset = (self._map_beam_phase * 2) % step
-        d = phase_offset
-        while d < length:
-            d2 = min(d + dash_len, length)
-            lx1 = x1 + dx / length * d
-            ly1 = y1 + dy / length * d
-            lx2 = x1 + dx / length * d2
-            ly2 = y1 + dy / length * d2
-            canvas.create_line(lx1, ly1, lx2, ly2,
-                               fill=POTA_TUNED, width=2, tags="beam_line")
-            d += step
+        for (x2, y2) in self._map_tuned_pxs:
+            dx = x2 - x1
+            dy = y2 - y1
+            length = math.hypot(dx, dy)
+            if length < 1:
+                continue
+            d = phase_offset
+            while d < length:
+                d2 = min(d + dash_len, length)
+                lx1 = x1 + dx / length * d
+                ly1 = y1 + dy / length * d
+                lx2 = x1 + dx / length * d2
+                ly2 = y1 + dy / length * d2
+                canvas.create_line(lx1, ly1, lx2, ly2,
+                                   fill=POTA_TUNED, width=2, tags="beam_line")
+                d += step
         self._map_beam_phase = (self._map_beam_phase + 1) % 6
         self._map_beam_id = self.after(80, self._map_beam_tick)
 
@@ -2296,6 +2319,8 @@ header::after{content:'';position:absolute;inset:0;pointer-events:none;backgroun
   text-shadow:0 0 30px rgba(255,32,32,.9),0 0 60px rgba(255,32,32,.5);
   user-select:none;pointer-events:none;}
 .day-mode #activator-banner{text-shadow:none;color:#990000;}
+@keyframes banner-flash{0%{opacity:1;}49%{opacity:1;}50%{opacity:0;}99%{opacity:0;}100%{opacity:1;}}
+.banner-flashing{animation:banner-flash 1s linear 3 forwards;}
 </style>
 </head>
 <body>
@@ -2435,7 +2460,7 @@ function disableRadar(){
   if(radarRefreshTimer){clearInterval(radarRefreshTimer);radarRefreshTimer=null;}
   if(radarLayer){map.removeLayer(radarLayer);radarLayer=null;}
   var btn=document.getElementById('radar-btn');btn.className='off';btn.textContent='◎ RADAR OFF';}
-var markers=[],beamLine=null,_tunedSpot=null,_tunedCardSpot=null,_activatorMode=false,_lastPark='',_flrigFreqKhz=null,_flrigMode=null;
+var markers=[],beamLines=[],_tunedSpot=null,_tunedCardSpot=null,_activatorMode=false,_lastPark='',_flrigFreqKhz=null,_flrigMode=null;
 var BAND_COLORS={'160m':'#ff4444','80m':'#ff8800','60m':'#ffcc00','40m':'#aaff00',
   '30m':'#00ffaa','20m':'#00e5ff','17m':'#0088ff','15m':'#8844ff',
   '12m':'#ff44cc','10m':'#ff2288','6m':'#ff0055','2m':'#ff6688','other':'#aaaaaa'};
@@ -2451,7 +2476,7 @@ function freqToBand(k){
   return 'other';}
 function clearMarkers(){
   markers.forEach(function(m){map.removeLayer(m);});markers=[];
-  if(beamLine){map.removeLayer(beamLine);beamLine=null;}}
+  beamLines.forEach(function(l){map.removeLayer(l);});beamLines=[];}
 function updateStatsPanel(d){
   var spots=d.spots||[],qsos=d.qsos||[];
   document.getElementById('stat-spots').textContent=spots.length||'—';
@@ -2478,8 +2503,8 @@ function updateStatsPanel(d){
   }else{llBox.style.display='none';llEmpty.style.display='block';}
   var tsBox=document.getElementById('tuned-station-box');
   var tsEmpty=document.getElementById('ts-empty');
-  if(d.tuned_spot&&d.tuned_spot.activator){
-    var ts=d.tuned_spot;
+  if(d.tuned_spots&&d.tuned_spots.length&&d.tuned_spots[0].activator){
+    var ts=d.tuned_spots[0];
     _tunedSpot=ts;_tunedCardSpot=ts;
     document.getElementById('ts-call').textContent=ts.activator;
     var tdet='';
@@ -2556,10 +2581,11 @@ function refreshData(){
         html:'<span style="color:#ff2222;font-size:18px;">&#9733;</span>',
         className:'',iconAnchor:[9,9]})});
       star.bindPopup('My grid: '+mg.gs);star.addTo(map);markers.push(star);}
-    if(d.my_grid&&d.tuned_spot){
-      var gcp=gcPoints(d.my_grid.lat,d.my_grid.lon,d.tuned_spot.lat,d.tuned_spot.lon,60);
-      beamLine=L.polyline(gcp,{color:'#00e5ff',weight:2.5,dashArray:'12 8',opacity:0.85,className:'beam-anim'});
-      beamLine.addTo(map);}
+    if(d.my_grid&&d.tuned_spots&&d.tuned_spots.length){
+      d.tuned_spots.forEach(function(ts){
+        var gcp=gcPoints(d.my_grid.lat,d.my_grid.lon,ts.lat,ts.lon,60);
+        var bl=L.polyline(gcp,{color:'#00e5ff',weight:2.5,dashArray:'12 8',opacity:0.85,className:'beam-anim'});
+        bl.addTo(map);beamLines.push(bl);});}
     updateStatsPanel(d);
     updateSpotsPanel(d);
     var sb=document.getElementById('scan-btn');
@@ -2608,7 +2634,13 @@ setInterval(function(){
 function toggleMode(){
   _activatorMode=!_activatorMode;
   var btn=document.getElementById('mode-toggle-btn');
-  if(_activatorMode){btn.textContent='HUNTER MODE';btn.className='mode-btn activator';openLogModal(null);}
+  if(_activatorMode){
+    btn.textContent='HUNTER MODE';btn.className='mode-btn activator';openLogModal(null);
+    var banner=document.getElementById('activator-banner');
+    banner.classList.remove('banner-flashing');
+    void banner.offsetWidth;
+    banner.classList.add('banner-flashing');
+    banner.addEventListener('animationend',function(){banner.classList.remove('banner-flashing');},{once:true});}
   else{btn.textContent='ACTIVATOR MODE';btn.className='mode-btn';}}
 function toggleRespoPanel(){
   var p=document.getElementById('respot-panel');
@@ -3007,7 +3039,7 @@ function clearLogModal(){
                             "spot_time": str(s.get("spotTime", s.get("timestamp", ""))),
                         })
                     my_grid_data = None
-                    tuned_spot = None
+                    tuned_spots = []
                     my_gs = (app.cfg.get("gridsquare") or "")[:6].strip().upper()
                     if len(my_gs) >= 4:
                         mlat, mlon = grid_to_latlon(my_gs)
@@ -3015,13 +3047,12 @@ function clearLogModal(){
                             my_grid_data = {"gs": my_gs, "lat": mlat, "lon": mlon}
                     for sp in spots_out:
                         if sp["tuned"]:
-                            tuned_spot = {
+                            tuned_spots.append({
                                 "lat": sp["lat"], "lon": sp["lon"],
                                 "activator": sp["activator"], "park": sp["park"],
                                 "park_name": sp["park_name"], "gs": sp["gs"],
                                 "freq_khz": sp["freq_khz"], "mode": sp["mode"],
-                            }
-                            break
+                            })
                     # Build QSO markers from logged contacts
                     qsos_out = []
                     try:
@@ -3081,7 +3112,7 @@ function clearLogModal(){
                         "spots": spots_out,
                         "qsos": qsos_out,
                         "my_grid": my_grid_data,
-                        "tuned_spot": tuned_spot,
+                        "tuned_spots": tuned_spots,
                         "scanning": app._pota_scan_active,
                         "callsign": app.cfg.get("callsign", ""),
                         "flrig_connected": app._flrig_freq_hz is not None,
@@ -3484,7 +3515,7 @@ function clearLogModal(){
         self._pota_status_lbl.config(text=f"Tuning to {freq_mhz_disp} MHz…", fg=FG2)
 
         def _tune():
-            result = flrig_set_freq(host, port, freq_hz)
+            result = flrig_set_freq_and_mode(host, port, freq_hz, spot_mode)
             if result is True:
                 msg = f"Tuned → {freq_mhz_disp} MHz"
                 fg  = ACC3
@@ -3527,8 +3558,9 @@ function clearLogModal(){
         port = self.cfg["flrig_port"]
         self._pota_status_lbl.config(text=f"Tuning to {freq_mhz_disp} MHz…", fg=FG2)
 
+        map_mode = str(data.get("mode", "")).strip()
         def _tune():
-            result = flrig_set_freq(host, port, freq_hz)
+            result = flrig_set_freq_and_mode(host, port, freq_hz, map_mode)
             if result is True:
                 self._tune_suppress_until = time.monotonic() + 3.0
                 self.after(0, lambda: self._update_vfo_display(freq_hz, self._flrig_mode, force=True))
