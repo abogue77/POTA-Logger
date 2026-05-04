@@ -1,77 +1,98 @@
 """
-Generate POTA-Logger icon as PNG and ICO from scratch using Pillow.
-Matches the SVG design: light sky background, pine tree, radio arcs, antenna dot.
+Generate POTA-Logger icon as PNG and ICO.
+- Matches icon.svg: transparent background, 2-tier tree, 2 thick arcs
+- 8x oversample + Lanczos + unsharp mask for crisp edges
+- ICO written with raw PNG blobs (rcedit embeds this into the exe without re-encoding)
 """
 
-from PIL import Image, ImageDraw
-import math, os
+from PIL import Image, ImageDraw, ImageFilter
+import math, os, io, struct
 
 OUT = os.path.dirname(os.path.abspath(__file__))
+OVERSAMPLE = 8
 
 
-def draw_icon(size):
+def arc_band(cx, cy, inner_r, outer_r, start_deg=30, end_deg=150, steps=120):
+    """Thick arc as a filled polygon, opening upward."""
+    pts = []
+    for i in range(steps + 1):
+        a = math.radians(start_deg + (end_deg - start_deg) * i / steps)
+        pts.append((cx + outer_r * math.cos(a), cy - outer_r * math.sin(a)))
+    for i in range(steps, -1, -1):
+        a = math.radians(start_deg + (end_deg - start_deg) * i / steps)
+        pts.append((cx + inner_r * math.cos(a), cy - inner_r * math.sin(a)))
+    return pts
+
+
+def draw_icon(target_size):
+    size = target_size * OVERSAMPLE
+    s    = size / 256
+    cx   = size / 2
+
     img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    d = ImageDraw.Draw(img)
-    s = size / 256  # scale factor
+    d   = ImageDraw.Draw(img)
 
-    # ── Background: rounded rect, light sky ───────────────────────────────────
-    r = int(40 * s)
-    bg = (238, 246, 251, 255)
-    d.rounded_rectangle([0, 0, size - 1, size - 1], radius=r, fill=bg)
+    # Trunk (matches SVG: x=111, y=193, w=34, h=36)
+    tw, th = int(34 * s), int(36 * s)
+    tx = int(cx - tw / 2)
+    ty = int(193 * s)
+    d.rounded_rectangle([tx, ty, tx + tw, ty + th],
+                        radius=max(1, int(5 * s)), fill=(92, 61, 30))
 
-    # ── Trunk ─────────────────────────────────────────────────────────────────
-    tx = int(118 * s); tw = int(20 * s); ty = int(200 * s); th = int(28 * s)
-    d.rounded_rectangle([tx, ty, tx + tw, ty + th], radius=int(4 * s), fill=(92, 61, 30))
-
-    # ── Pine tree tiers (bottom to top so lighter tiers overlap darker) ───────
-    cx = size / 2
-    tier_data = [
-        (140 * s, 210 * s, 52 * s, (30, 107, 47)),
-        (108 * s, 168 * s, 42 * s, (42, 140, 63)),
-        ( 72 * s, 132 * s, 32 * s, (53, 160, 80)),
+    # 2-tier pine tree (matches SVG polygons)
+    tiers = [
+        (100 * s, 205 * s, 72 * s, (26, 107, 48)),   # bottom: 128,100 / 56,205 / 200,205
+        ( 58 * s, 122 * s, 46 * s, (40, 146, 74)),   # top:    128,58  / 82,122 / 174,122
     ]
-    for apex_y, base_y, half_w, color in tier_data:
-        poly = [(cx, apex_y), (cx - half_w, base_y), (cx + half_w, base_y)]
-        d.polygon(poly, fill=color)
+    for ay, by, hw, color in tiers:
+        d.polygon([(cx, ay), (cx - hw, by), (cx + hw, by)], fill=color)
 
-    # ── Radio arcs (above treetop) ────────────────────────────────────────────
-    arc_color = (43, 126, 193)
-    lw = max(1, int(7 * s))
-    apex_y = 72 * s  # treetop
+    # Radio arcs centered at dot position (128, 65 in SVG)
+    arc_cy    = 65 * s
+    arc_color = (33, 113, 181)
+    half      = 6.5 * s   # half of SVG stroke-width 13
+    for radius in (32 * s, 58 * s):
+        d.polygon(arc_band(cx, arc_cy, radius - half, radius + half), fill=arc_color)
 
-    arcs = [
-        (24 * s, 88 * s),   # innermost
-        (42 * s, 72 * s),   # middle
-        (60 * s, 56 * s),   # outermost
-    ]
-    for radius, top_y in arcs:
-        # Draw arc: upper half of a circle centered at (cx, apex_y)
-        # bounding box of the full circle
-        bbox = [cx - radius, apex_y - radius, cx + radius, apex_y + radius]
-        d.arc(bbox, start=200, end=340, fill=arc_color, width=lw)
+    # Dot at (128, 65), r=10
+    dot_r = int(10 * s)
+    d.ellipse([cx - dot_r, arc_cy - dot_r, cx + dot_r, arc_cy + dot_r], fill=arc_color)
 
-    # ── Antenna dot ───────────────────────────────────────────────────────────
-    dot_r = int(6 * s)
-    d.ellipse([cx - dot_r, apex_y - dot_r, cx + dot_r, apex_y + dot_r],
-              fill=arc_color)
-
-    return img
+    out = img.resize((target_size, target_size), Image.LANCZOS)
+    if target_size >= 32:
+        out = out.filter(ImageFilter.UnsharpMask(radius=0.6, percent=160, threshold=2))
+    return out
 
 
-# ── Render at 256 for PNG ──────────────────────────────────────────────────────
+def save_ico(images, path):
+    """Write ICO storing each image as a raw PNG blob — rcedit embeds these without re-encoding."""
+    blobs = []
+    for img in images:
+        buf = io.BytesIO()
+        img.save(buf, format="PNG", optimize=False)
+        blobs.append(buf.getvalue())
+
+    count  = len(images)
+    offset = 6 + 16 * count
+
+    with open(path, "wb") as f:
+        f.write(struct.pack("<HHH", 0, 1, count))
+        for i, img in enumerate(images):
+            w = img.width  if img.width  < 256 else 0
+            h = img.height if img.height < 256 else 0
+            f.write(struct.pack("<BBBBHHII",
+                w, h, 0, 0, 1, 32, len(blobs[i]), offset))
+            offset += len(blobs[i])
+        for blob in blobs:
+            f.write(blob)
+
+
+ICO_SIZES = [16, 24, 32, 40, 48, 64, 96, 128, 256]
+
 icon_256 = draw_icon(256)
-png_path = os.path.join(OUT, "icon.png")
-icon_256.save(png_path, "PNG")
-print(f"Saved {png_path}")
+icon_256.save(os.path.join(OUT, "icon.png"), "PNG")
+print(f"Saved icon.png")
 
-# ── Multi-size ICO ────────────────────────────────────────────────────────────
-sizes = [16, 32, 48, 256]
-icons = [draw_icon(sz) for sz in sizes]
-ico_path = os.path.join(OUT, "icon.ico")
-icons[0].save(
-    ico_path,
-    format="ICO",
-    sizes=[(sz, sz) for sz in sizes],
-    append_images=icons[1:],
-)
-print(f"Saved {ico_path}")
+icons = [draw_icon(sz) for sz in ICO_SIZES]
+save_ico(icons, os.path.join(OUT, "icon.ico"))
+print(f"Saved icon.ico  ({len(ICO_SIZES)} sizes, PNG-blob format)")

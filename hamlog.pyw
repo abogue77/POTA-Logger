@@ -1303,6 +1303,13 @@ def lat_lon_to_itu_region(lat, lon):
         return 3
 
 # ══════════════════════════════════════════════════════════════════════════════
+def _resource(relative):
+    """Resolve path to a bundled resource (works both frozen and from source)."""
+    if hasattr(sys, "_MEIPASS"):
+        return os.path.join(sys._MEIPASS, relative)
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), relative)
+
+
 class POTAHunter(tk.Tk):
     def __init__(self):
         super().__init__()
@@ -1310,6 +1317,10 @@ class POTAHunter(tk.Tk):
         self.configure(bg=BG)
         self.minsize(1000, 640)
         self.resizable(True, True)
+        try:
+            self.iconbitmap(_resource(os.path.join("assets", "icon.ico")))
+        except Exception:
+            pass
 
         self.cfg           = load_config()
         self.conn          = make_index()
