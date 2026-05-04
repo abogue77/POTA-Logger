@@ -14,6 +14,7 @@ Storage  : ADIF (.adi) is the primary on-disk format per logbook.
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, simpledialog
 import sqlite3
+import subprocess
 import xmlrpc.client
 import urllib.request
 import urllib.parse
@@ -63,6 +64,8 @@ DEFAULT_CONFIG = {
     "pota_scan_interval":     15,
     "fcc_db_date":            "",
     "license_class":          "Extra",
+    "flrig_autostart":        False,
+    "flrig_exe_path":         "",
 }
 
 def load_config():
@@ -1399,7 +1402,10 @@ class POTAHunter(tk.Tk):
         if self.cfg["qrz_user"] and self.cfg["qrz_pass"]:
             threading.Thread(target=self._qrz_login_bg, daemon=True).start()
 
+        self._flrig_proc = None
+        self._flrig_proc_owned = False
         self._start_flrig_poll()
+        self._maybe_start_flrig()
         self.after(1500, self._check_parks_db_on_startup)
         self.after(2000, self._check_fcc_db_on_startup)
 
@@ -4522,6 +4528,25 @@ function clearLogModal(){
 
         self._start_flrig_poll()
 
+    # ── Flrig auto-start ──────────────────────────────────────────────────
+    def _maybe_start_flrig(self):
+        if not self.cfg.get("flrig_autostart") or not self.cfg.get("flrig_exe_path"):
+            return
+        try:
+            flrig_get(self.cfg["flrig_host"], self.cfg["flrig_port"])
+            return  # already running — don't own it
+        except Exception:
+            pass
+        try:
+            self._flrig_proc = subprocess.Popen(
+                [self.cfg["flrig_exe_path"]],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            self._flrig_proc_owned = True
+        except Exception as e:
+            messagebox.showwarning("flrig", f"Could not start flrig:\n{e}")
+
     # ── Flrig poll ────────────────────────────────────────────────────────
     def _start_flrig_poll(self):
         self._flrig_polling = False
@@ -4643,6 +4668,8 @@ function clearLogModal(){
             "Logbooks folder: " + LOGBOOK_DIR)
 
     def destroy(self):
+        if self._flrig_proc_owned and self._flrig_proc and self._flrig_proc.poll() is None:
+            self._flrig_proc.terminate()
         if self._flrig_poll_id:
             self.after_cancel(self._flrig_poll_id)
         if self._pota_after_id:
@@ -4822,17 +4849,43 @@ class FlrigDialog(tk.Toplevel):
         lbl=dict(bg=BG,fg=FG2,font=SM)
         tk.Label(self,text="Flrig Host:",**lbl).grid(row=0,column=0,sticky="e",padx=(12,6),pady=6)
         self.e_host=tk.Entry(self,width=20,**ent); self.e_host.insert(0,cfg.get("flrig_host","127.0.0.1"))
-        self.e_host.grid(row=0,column=1,padx=(0,12),pady=6)
+        self.e_host.grid(row=0,column=1,columnspan=2,padx=(0,12),pady=6,sticky="w")
         tk.Label(self,text="Flrig Port:",**lbl).grid(row=1,column=0,sticky="e",padx=(12,6),pady=6)
         self.e_port=tk.Entry(self,width=8,**ent); self.e_port.insert(0,str(cfg.get("flrig_port",12345)))
-        self.e_port.grid(row=1,column=1,padx=(0,12),pady=6,sticky="w")
+        self.e_port.grid(row=1,column=1,columnspan=2,padx=(0,12),pady=6,sticky="w")
+        # Auto-start option
+        self._autostart_var=tk.BooleanVar(value=cfg.get("flrig_autostart",False))
+        tk.Checkbutton(self,text="Auto-start flrig on launch / close on exit",
+                       variable=self._autostart_var,bg=BG,fg=FG2,selectcolor=BG3,
+                       activebackground=BG,activeforeground=FG,font=SM,
+                       command=self._toggle_path_state
+                       ).grid(row=2,column=0,columnspan=3,sticky="w",padx=(12,6),pady=(8,2))
+        tk.Label(self,text="Flrig Path:",**lbl).grid(row=3,column=0,sticky="e",padx=(12,6),pady=4)
+        self.e_path=tk.Entry(self,width=28,**ent); self.e_path.insert(0,cfg.get("flrig_exe_path",""))
+        self.e_path.grid(row=3,column=1,padx=(0,4),pady=4,sticky="w")
+        self._browse_btn=tk.Button(self,text="Browse…",bg=BG4,fg=FG,font=SM,relief="flat",
+                                   cursor="hand2",padx=6,pady=2,command=self._browse)
+        self._browse_btn.grid(row=3,column=2,padx=(0,12),pady=4,sticky="w")
+        self._toggle_path_state()
         self._tl=tk.Label(self,text="",bg=BG,fg=FG2,font=SM)
-        self._tl.grid(row=2,column=0,columnspan=2)
-        bf=tk.Frame(self,bg=BG); bf.grid(row=3,column=0,columnspan=2,pady=10)
+        self._tl.grid(row=4,column=0,columnspan=3)
+        bf=tk.Frame(self,bg=BG); bf.grid(row=5,column=0,columnspan=3,pady=10)
         bc=dict(font=SM,relief="flat",cursor="hand2",pady=4,padx=12)
         tk.Button(bf,text="⟳ Test",bg=BG4,fg=FG,command=self._test,**bc).pack(side="left",padx=6)
         tk.Button(bf,text="✔ Save",bg=ACC3,fg=BG,command=self._save,**bc).pack(side="left",padx=6)
         tk.Button(bf,text="✕ Cancel",bg=BG3,fg=FG,command=self.destroy,**bc).pack(side="left")
+    def _toggle_path_state(self):
+        state = "normal" if self._autostart_var.get() else "disabled"
+        self.e_path.config(state=state)
+        self._browse_btn.config(state=state)
+    def _browse(self):
+        import sys
+        filetypes = [("Executable", "*.exe"), ("All files", "*.*")] if sys.platform == "win32" \
+                    else [("All files", "*.*")]
+        path = filedialog.askopenfilename(title="Select flrig executable", filetypes=filetypes)
+        if path:
+            self.e_path.delete(0, "end")
+            self.e_path.insert(0, path)
     def _test(self):
         host=self.e_host.get().strip()
         try: port=int(self.e_port.get().strip())
@@ -4848,6 +4901,8 @@ class FlrigDialog(tk.Toplevel):
         self.cfg["flrig_host"]=self.e_host.get().strip()
         try: self.cfg["flrig_port"]=int(self.e_port.get().strip())
         except ValueError: pass
+        self.cfg["flrig_autostart"]=self._autostart_var.get()
+        self.cfg["flrig_exe_path"]=self.e_path.get().strip()
         save_config(self.cfg); self.destroy()
 
 
