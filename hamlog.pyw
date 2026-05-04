@@ -4532,11 +4532,9 @@ function clearLogModal(){
     def _maybe_start_flrig(self):
         if not self.cfg.get("flrig_autostart") or not self.cfg.get("flrig_exe_path"):
             return
-        try:
-            flrig_get(self.cfg["flrig_host"], self.cfg["flrig_port"])
+        freq, _ = flrig_get(self.cfg["flrig_host"], self.cfg["flrig_port"])
+        if freq is not None:
             return  # already running — don't own it
-        except Exception:
-            pass
         try:
             self._flrig_proc = subprocess.Popen(
                 [self.cfg["flrig_exe_path"]],
