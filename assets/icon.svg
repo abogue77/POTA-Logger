@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <!-- Background: rounded square, light sky -->
+  <rect width="256" height="256" rx="40" ry="40" fill="#EEF6FB"/>
+
+  <!-- Radio arcs emanating from treetop (center-top of tree) -->
+  <!-- Arc 1 - smallest/innermost -->
+  <path d="M 108 88 A 24 24 0 0 1 148 88"
+        fill="none" stroke="#2B7EC1" stroke-width="7" stroke-linecap="round"/>
+  <!-- Arc 2 - medium -->
+  <path d="M 94 72 A 42 42 0 0 1 162 72"
+        fill="none" stroke="#2B7EC1" stroke-width="7" stroke-linecap="round"/>
+  <!-- Arc 3 - largest/outermost -->
+  <path d="M 79 56 A 60 60 0 0 1 177 56"
+        fill="none" stroke="#2B7EC1" stroke-width="7" stroke-linecap="round"/>
+
+  <!-- Pine tree - layered tiers, dark forest green -->
+  <!-- Trunk -->
+  <rect x="118" y="200" width="20" height="28" rx="4" fill="#5C3D1E"/>
+
+  <!-- Bottom tier (widest) -->
+  <polygon points="128,140 76,210 180,210" fill="#1E6B2F"/>
+  <!-- Middle tier -->
+  <polygon points="128,108 86,168 170,168" fill="#2A8C3F"/>
+  <!-- Top tier (narrowest, tip points up toward arcs) -->
+  <polygon points="128,72 96,132 160,132" fill="#35A050"/>
+
+  <!-- Antenna dot at treetop -->
+  <circle cx="128" cy="72" r="6" fill="#2B7EC1"/>
+</svg>
