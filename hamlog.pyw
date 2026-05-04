@@ -2266,6 +2266,36 @@ header::after{content:'';position:absolute;inset:0;pointer-events:none;backgroun
 #respot-status{font-size:.55rem;letter-spacing:1px;min-height:1.2em;}
 #respot-status.ok{color:var(--green);}
 #respot-status.err{color:#ff4040;}
+/* ── Day-mode readability overrides ─────────────────────────── */
+.day-mode .card{background:rgba(255,255,255,.5);}
+.day-mode .card-value{text-shadow:none;}
+.day-mode .spot-item{background:rgba(255,255,255,.4);}
+.day-mode .spot-item:hover{background:rgba(0,61,119,.1);box-shadow:none;}
+.day-mode .spot-item.tuned{background:rgba(0,61,119,.1);}
+.day-mode .spot-item.tuned:hover{background:rgba(0,61,119,.15);}
+.day-mode .spot-call{text-shadow:none;}
+.day-mode .lm-input{background:#fff;}
+.day-mode .lm-input:focus{box-shadow:0 0 4px rgba(0,61,119,.35);}
+.day-mode .respot-input{background:#fff;}
+.day-mode #respot-panel{background:rgba(255,255,255,.35);}
+.day-mode #log-modal{box-shadow:0 4px 24px rgba(0,0,0,.28);}
+.day-mode .lm-title{text-shadow:none;}
+.day-mode .logo{text-shadow:none;}
+.day-mode #scan-btn.active{text-shadow:none;}
+.day-mode #radar-btn.on{text-shadow:none;}
+.day-mode .mode-btn{box-shadow:none;}
+.day-mode #respot-btn:hover{border-color:var(--cyan);color:var(--cyan);}
+.day-mode #scan-overlay{background:rgba(220,230,240,.92);color:var(--cyan);border-color:var(--cyan);text-shadow:none;}
+/* ── VFO display ─────────────────────────────────────────────── */
+#vfo-display{transition:color .4s;}
+#vfo-display.live{color:var(--green);}
+/* ── Activator banner ────────────────────────────────────────── */
+#activator-banner{display:none;position:absolute;top:28px;left:0;right:0;
+  text-align:center;font-family:'Orbitron',sans-serif;font-size:2.2rem;font-weight:900;
+  letter-spacing:8px;color:#ff2020;
+  text-shadow:0 0 30px rgba(255,32,32,.9),0 0 60px rgba(255,32,32,.5);
+  user-select:none;pointer-events:none;}
+.day-mode #activator-banner{text-shadow:none;color:#990000;}
 </style>
 </head>
 <body>
@@ -2275,6 +2305,7 @@ header::after{content:'';position:absolute;inset:0;pointer-events:none;backgroun
     <span><span class="status-dot offline" id="status-dot"></span><span id="status-text">OFFLINE</span></span>
     <span id="clock">--:--:-- ZULU</span>
     <span id="mycall" style="color:var(--cyan);font-family:'Orbitron',sans-serif;font-size:.95rem;letter-spacing:3px;"></span>
+    <span id="vfo-display" style="font-family:'Orbitron',sans-serif;font-size:.85rem;letter-spacing:2px;color:var(--dim);">— · —</span>
   </div>
   <div style="display:flex;align-items:center;gap:0;">
     <div id="scan-btn" class="paused">⏸ SCAN PAUSED</div>
@@ -2408,6 +2439,9 @@ var markers=[],beamLine=null,_tunedSpot=null,_tunedCardSpot=null,_activatorMode=
 var BAND_COLORS={'160m':'#ff4444','80m':'#ff8800','60m':'#ffcc00','40m':'#aaff00',
   '30m':'#00ffaa','20m':'#00e5ff','17m':'#0088ff','15m':'#8844ff',
   '12m':'#ff44cc','10m':'#ff2288','6m':'#ff0055','2m':'#ff6688','other':'#aaaaaa'};
+var BAND_COLORS_DAY={'160m':'#cc0000','80m':'#b85a00','60m':'#907000','40m':'#3a7000',
+  '30m':'#006a40','20m':'#005899','17m':'#0055cc','15m':'#5500cc',
+  '12m':'#aa0099','10m':'#cc0066','6m':'#cc0033','2m':'#993344','other':'#555555'};
 function freqToBand(k){
   if(!k)return 'other';
   if(k<2000)return '160m';if(k<4000)return '80m';if(k<5500)return '60m';
@@ -2427,7 +2461,7 @@ function updateStatsPanel(d){
   var keys=Object.keys(bc),bandsEl=document.getElementById('stat-bands');
   if(!keys.length){bandsEl.innerHTML='<div style="color:var(--dim);font-size:.6rem;letter-spacing:2px">NO SPOTS</div>';}
   else{bandsEl.innerHTML=keys.sort().map(function(b){
-    var c=BAND_COLORS[b]||'#aaa';
+    var c=(_dayMode?BAND_COLORS_DAY:BAND_COLORS)[b]||(_dayMode?'#555':'#aaa');
     return '<div class="chip" style="border-color:'+c+';color:'+c+'"><strong>'+bc[b]+'</strong> '+b+'</div>';
   }).join('');}
   var llBox=document.getElementById('last-logged-box');
@@ -2466,7 +2500,7 @@ function updateSpotsPanel(d){
     var badge=s.tuned?'<span class="spot-badge tuned">&#9679; TUNED</span>'
       :s.worked?'<span class="spot-badge worked">&#10003; WORKED</span>':'';
     var mhz=s.freq_khz?(s.freq_khz/1000).toFixed(3)+' MHz':'?';
-    var band=freqToBand(s.freq_khz),bc=BAND_COLORS[band]||'#aaa';
+    var band=freqToBand(s.freq_khz),bc=(_dayMode?BAND_COLORS_DAY:BAND_COLORS)[band]||(_dayMode?'#555':'#aaa');
     return '<div class="spot-item '+cls+'" data-i="'+i+'">'
       +'<div class="spot-call"><span>'+s.activator+'</span>'+badge+'</div>'
       +'<div class="spot-meta"><span class="spot-park">'+(s.park||'?')+'</span>'
@@ -2539,6 +2573,13 @@ function refreshData(){
     else{dot.className='status-dot offline';stxt.textContent='OFFLINE';}
     if(d.flrig_freq_khz!=null){_flrigFreqKhz=d.flrig_freq_khz;}
     if(d.flrig_mode){_flrigMode=d.flrig_mode;}
+    var vfoEl=document.getElementById('vfo-display');
+    if(vfoEl){
+      if(d.flrig_connected&&d.flrig_freq_khz!=null){
+        var mhz=(d.flrig_freq_khz/1000).toFixed(4);
+        vfoEl.textContent=mhz+' MHz \xb7 '+(d.flrig_mode||'—');
+        vfoEl.className='live';
+      }else{vfoEl.textContent='— \xb7 —';vfoEl.className='';}}
   }).catch(function(e){console.error('Fetch error:',e);});}
 function gcPoints(la1,lo1,la2,lo2,n){
   var R=Math.PI/180;
@@ -2663,6 +2704,7 @@ function openLogModal(spot){
   var st=document.getElementById('lm-status');st.textContent='';st.className='';
   document.getElementById('lm-submit-btn').disabled=false;
   document.getElementById('lm-clear-btn').style.display=_activatorMode?'':'none';
+  document.getElementById('activator-banner').style.display=_activatorMode?'block':'none';
   fetch('/scan_pause',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({state:1})});
   var ov=document.getElementById('log-modal-overlay');ov.style.display='flex';
   setTimeout(function(){document.getElementById('lm-call').focus();},50);}
@@ -2677,6 +2719,7 @@ function deactivateActivatorMode(){
   document.getElementById('mode-toggle-btn').textContent='ACTIVATOR MODE';
   document.getElementById('mode-toggle-btn').className='mode-btn';
   document.getElementById('lm-clear-btn').style.display='none';
+  document.getElementById('activator-banner').style.display='none';
   document.getElementById('lm-freq').setAttribute('readonly','');
   document.getElementById('lm-mode').setAttribute('readonly','');
   document.getElementById('log-modal-overlay').style.display='none';
@@ -2758,6 +2801,7 @@ function clearLogModal(){
   document.getElementById('lm-call').focus();}
 </script>
 <div id="log-modal-overlay">
+  <div id="activator-banner">&#9632; ACTIVATED &#9632;</div>
   <div id="log-modal">
     <div class="lm-title">&#9632; LOG QSO</div>
     <div class="lm-row">
