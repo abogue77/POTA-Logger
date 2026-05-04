@@ -468,6 +468,7 @@ def adif_to_row_dict(d):
 
 def load_adif_into_index(adif_path, conn):
     conn.execute("DELETE FROM qso")
+    conn.execute("DELETE FROM sqlite_sequence WHERE name='qso'")
     conn.commit()
     if not os.path.exists(adif_path):
         return 0
@@ -2260,6 +2261,9 @@ header::after{content:'';position:absolute;inset:0;pointer-events:none;backgroun
 .lm-btn.selfspot:disabled{opacity:.35;cursor:not-allowed;}
 .lm-btn.clear{color:var(--cyan);border-color:#005a6e;}
 .lm-btn.clear:hover{background:rgba(0,229,255,.08);box-shadow:0 0 8px rgba(0,229,255,.1);}
+.lm-btn.multiop{color:#cc88ff;border-color:#5a2080;}
+.lm-btn.multiop:hover{background:rgba(200,100,255,.08);box-shadow:0 0 8px rgba(200,100,255,.1);}
+.lm-btn.multiop:disabled{opacity:.35;cursor:not-allowed;}
 #lm-status{font-size:.6rem;letter-spacing:1px;min-height:1.4em;text-align:center;margin-top:8px;}
 #lm-status.ok{color:var(--green);}
 #lm-status.err{color:#ff4040;}
@@ -2646,7 +2650,7 @@ function toggleMode(){
   _activatorMode=!_activatorMode;
   var btn=document.getElementById('mode-toggle-btn');
   if(_activatorMode){
-    btn.textContent='HUNTER MODE';btn.className='mode-btn activator';openLogModal(null);
+    btn.textContent='HUNTER MODE';btn.className='mode-btn activator';_lastPark='';openLogModal(null);
     var banner=document.getElementById('activator-banner');
     banner.classList.remove('banner-flashing');
     void banner.offsetWidth;
@@ -2747,6 +2751,7 @@ function openLogModal(spot){
   var st=document.getElementById('lm-status');st.textContent='';st.className='';
   document.getElementById('lm-submit-btn').disabled=false;
   document.getElementById('lm-clear-btn').style.display=_activatorMode?'':'none';
+  document.getElementById('lm-multiop-btn').style.display=_activatorMode?'none':'';
   document.getElementById('activator-banner').style.display=_activatorMode?'block':'none';
   fetch('/scan_pause',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({state:1})});
   var ov=document.getElementById('log-modal-overlay');ov.style.display='flex';
@@ -2804,6 +2809,41 @@ function submitLogQSO(){
             document.getElementById('lm-call').focus();
           },700);
         }else{setTimeout(closeLogModal,900);}
+      }else{st.textContent='ERROR: '+(data.error||'unknown');st.className='err';btn.disabled=false;}})
+    .catch(function(){st.textContent='NETWORK ERROR';st.className='err';btn.disabled=false;});}
+function submitMultiOp(){
+  var call=document.getElementById('lm-call').value.trim().toUpperCase();
+  var st=document.getElementById('lm-status');
+  if(!call){st.textContent='CALLSIGN REQUIRED';st.className='err';return;}
+  var payload={
+    call:call,
+    name:document.getElementById('lm-name').value.trim(),
+    qth:document.getElementById('lm-qth').value.trim(),
+    park:document.getElementById('lm-park').value.trim(),
+    freq_khz:parseFloat(document.getElementById('lm-freq').value)||0,
+    mode:document.getElementById('lm-mode').value.trim().toUpperCase(),
+    rst_sent:document.getElementById('lm-rst-s').value.trim()||'59',
+    rst_rcvd:document.getElementById('lm-rst-r').value.trim()||'59',
+    gridsquare:document.getElementById('lm-grid').value.trim().toUpperCase(),
+    comment:document.getElementById('lm-comment').value.trim()};
+  var btn=document.getElementById('lm-multiop-btn');
+  btn.disabled=true;st.textContent='LOGGING…';st.className='';
+  fetch('/log',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(payload)})
+    .then(function(r){return r.json();})
+    .then(function(data){
+      if(data.ok){
+        st.textContent='LOGGED ✔';st.className='ok';
+        setTimeout(function(){
+          document.getElementById('lm-call').value='';
+          document.getElementById('lm-name').value='';
+          document.getElementById('lm-qth').value='';
+          document.getElementById('lm-rst-s').value='59';
+          document.getElementById('lm-rst-r').value='59';
+          st.textContent='';st.className='';
+          btn.disabled=false;
+          document.getElementById('lm-call').focus();
+        },700);
       }else{st.textContent='ERROR: '+(data.error||'unknown');st.className='err';btn.disabled=false;}})
     .catch(function(){st.textContent='NETWORK ERROR';st.className='err';btn.disabled=false;});}
 refreshData();
@@ -2894,6 +2934,9 @@ function clearLogModal(){
     <div id="lm-status"></div>
     <div class="lm-btns" style="margin-top:16px">
       <button class="lm-btn confirm" id="lm-submit-btn" onclick="submitLogQSO()">&#9632; LOG QSO</button>
+    </div>
+    <div class="lm-btns" style="margin-top:8px">
+      <button class="lm-btn multiop" id="lm-multiop-btn" onclick="submitMultiOp()">&#9654; MULTI-OP</button>
     </div>
     <div class="lm-btns" style="margin-top:8px">
       <button class="lm-btn selfspot" id="lm-selfspot-btn" style="display:none" onclick="submitSelfSpot()">&#10023; SELF SPOT</button>
@@ -3815,8 +3858,10 @@ function clearLogModal(){
         tk.Button(btn_row, text=" Snipe QSO", image=self._reticle_img,
                   compound="left", bg=ACCENT, fg=BG,
                   command=self._log_qso, **bc).pack(side="left")
+        tk.Button(btn_row, text="⊕ Multi-Op", bg=BG2, fg=FG,
+                  command=self._multi_op_qso, **bc).pack(side="left", padx=8)
         tk.Button(btn_row, text="✕ Clear Form", bg=BG3, fg=FG2,
-                  command=self._clear_form, **bc).pack(side="left", padx=8)
+                  command=self._clear_form, **bc).pack(side="left")
 
         tk.Label(btn_row, text="Check for clear freq kHz:", bg=BG, fg=FG2, font=LBL).pack(side="left", padx=(12, 2))
         self._freq_check_border = tk.Frame(btn_row, bg=MUTED)
@@ -4038,6 +4083,14 @@ function clearLogModal(){
         self._refresh_pota_highlights()
         self._maybe_post_pota_spot(row)
         self._clear_form()
+
+    def _multi_op_qso(self):
+        """Log QSO then restore park/grid so the next contact at the same park is ready."""
+        park = self.e_park.get().strip()
+        grid = self.e_grid.get().strip()
+        self._log_qso()
+        self.e_park.delete(0, "end"); self.e_park.insert(0, park)
+        self.e_grid.delete(0, "end"); self.e_grid.insert(0, grid)
 
     def _log_qso_from_web(self, data):
         """Log a QSO submitted from the HTML map page. Returns True or an error string."""
