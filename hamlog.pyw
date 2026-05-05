@@ -2155,15 +2155,16 @@ class POTAHunter(tk.Tk):
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
 <title>POTA Hunter — Live Map</title>
-<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;700&family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
 :root{--red:#ff2020;--red-dim:#8b0000;--amber:#ff9900;--green:#00ff88;--cyan:#00e5ff;--bg:#030609;--panel:#070d12;--border:#1a3040;--text:#c8dde8;--dim:#3a5060;}
 :root.day-mode{--red:#990000;--red-dim:#6a1010;--amber:#7a3d00;--green:#004d22;--cyan:#003d77;--bg:#dfe6ed;--panel:#b8c8d8;--border:#4a7090;--text:#080e14;--dim:#2a4860;}
 *{margin:0;padding:0;box-sizing:border-box;}
-html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);font-family:'Share Tech Mono',monospace;}
+html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);font-family:'Roboto Mono',Consolas,monospace;}
 body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:9000;background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,.07) 2px,rgba(0,0,0,.07) 4px);}
 .day-mode body::before{display:none;}
 header{height:62px;display:flex;align-items:center;justify-content:space-between;padding:0 24px;border-bottom:1px solid var(--red);background:linear-gradient(90deg,#0a0002,#0d0008,#0a0002);position:relative;z-index:1000;flex-shrink:0;}
@@ -2201,7 +2202,7 @@ header::after{content:'';position:absolute;inset:0;pointer-events:none;backgroun
 .spot-item.tuned:hover{background:rgba(0,229,255,.09);}
 .spot-item.worked{border-left-color:#00bb44;}
 .spot-item.worked:hover{background:rgba(0,187,68,.07);}
-.spot-call{font-family:'Orbitron',sans-serif;font-size:.72rem;color:var(--cyan);text-shadow:0 0 6px rgba(0,229,255,.4);display:flex;align-items:center;justify-content:space-between;}
+.spot-call{font-family:'Roboto Mono',Consolas,monospace;font-size:.72rem;color:var(--cyan);text-shadow:0 0 6px rgba(0,229,255,.4);display:flex;align-items:center;justify-content:space-between;}
 .spot-badge{font-size:.52rem;letter-spacing:1px;padding:1px 5px;border:1px solid currentColor;}
 .spot-badge.tuned{color:var(--cyan);}
 .spot-badge.worked{color:#00bb44;}
@@ -2222,7 +2223,7 @@ header::after{content:'';position:absolute;inset:0;pointer-events:none;backgroun
 .stn-box{border:1px solid;padding:7px 10px;margin-top:3px;flex-shrink:0;}
 .stn-box.logged{border-color:var(--green);background:rgba(0,255,136,.04);}
 .stn-box.tuned-s{border-color:var(--cyan);background:rgba(0,229,255,.04);}
-.stn-call{font-family:'Orbitron',sans-serif;font-size:.72rem;letter-spacing:1px;}
+.stn-call{font-family:'Roboto Mono',Consolas,monospace;font-size:.72rem;letter-spacing:1px;}
 .stn-call.logged{color:var(--green);text-shadow:0 0 6px rgba(0,255,136,.4);}
 .stn-call.tuned-s{color:var(--cyan);text-shadow:0 0 6px rgba(0,229,255,.4);}
 .day-mode .stn-box.logged{background:rgba(0,77,34,.08);}
@@ -2237,7 +2238,7 @@ header::after{content:'';position:absolute;inset:0;pointer-events:none;backgroun
 #log-modal-overlay{position:fixed;inset:0;z-index:9500;background:rgba(0,0,0,.82);
   display:none;align-items:center;justify-content:center;}
 #log-modal{background:var(--panel);border:1px solid var(--cyan);padding:22px 26px;width:340px;
-  font-family:'Share Tech Mono',monospace;position:relative;
+  font-family:'Roboto Mono',Consolas,monospace;position:relative;
   box-shadow:0 0 40px rgba(0,229,255,.18);}
 #log-modal.activator-mode{width:460px;padding:26px 32px;}
 #log-modal::before{content:'';position:absolute;top:0;left:0;width:3px;height:100%;background:var(--cyan);}
@@ -2248,7 +2249,7 @@ header::after{content:'';position:absolute;inset:0;pointer-events:none;backgroun
 .lm-label{font-size:.7rem;letter-spacing:2px;color:var(--dim);text-transform:uppercase;}
 .activator-mode .lm-label{font-size:.82rem;}
 .lm-input{background:rgba(0,229,255,.04);border:1px solid var(--border);color:var(--text);
-  font-family:'Share Tech Mono',monospace;font-size:.9rem;padding:5px 8px;outline:none;width:100%;
+  font-family:'Roboto Mono',Consolas,monospace;font-size:.9rem;padding:5px 8px;outline:none;width:100%;
   box-sizing:border-box;transition:border-color .15s;}
 .activator-mode .lm-input{font-size:1.05rem;padding:7px 10px;}
 .lm-input:focus{border-color:var(--cyan);box-shadow:0 0 6px rgba(0,229,255,.2);}
@@ -2299,7 +2300,7 @@ header::after{content:'';position:absolute;inset:0;pointer-events:none;backgroun
   background:rgba(0,229,255,.03);display:none;}
 .respot-row{display:flex;gap:6px;align-items:center;margin-bottom:6px;}
 .respot-input{flex:1;background:rgba(0,229,255,.04);border:1px solid var(--border);
-  color:var(--text);font-family:'Share Tech Mono',monospace;font-size:.75rem;
+  color:var(--text);font-family:'Roboto Mono',Consolas,monospace;font-size:.75rem;
   padding:4px 7px;outline:none;transition:border-color .15s;}
 .respot-input:focus{border-color:var(--cyan);}
 .respot-go{font-family:'Orbitron',sans-serif;font-size:.5rem;letter-spacing:1px;
@@ -2330,9 +2331,13 @@ header::after{content:'';position:absolute;inset:0;pointer-events:none;backgroun
 .day-mode .mode-btn{box-shadow:none;}
 .day-mode #respot-btn:hover{border-color:var(--cyan);color:var(--cyan);}
 .day-mode #scan-overlay{background:rgba(220,230,240,.92);color:var(--cyan);border-color:var(--cyan);text-shadow:none;}
+.day-mode .spot-item.worked{border-left-color:#1a6600;}
+.day-mode .spot-item.worked:hover{background:rgba(26,102,0,.12);}
+.day-mode .spot-badge.worked{color:#1a6600;font-weight:bold;}
 /* ── VFO display ─────────────────────────────────────────────── */
-#vfo-display{transition:color .4s;}
-#vfo-display.live{color:var(--green);}
+#vfo-display{transition:color .4s;font-size:.85rem;}
+#vfo-display.live{color:var(--green);font-size:1.15rem;font-weight:bold;text-shadow:0 0 12px var(--green),0 0 24px rgba(0,255,136,.4);}
+.day-mode #vfo-display.live{font-size:.85rem;font-weight:normal;text-shadow:none;}
 /* ── Activator banner ────────────────────────────────────────── */
 #activator-banner{display:none;position:absolute;top:28px;left:0;right:0;
   text-align:center;font-family:'Orbitron',sans-serif;font-size:2.2rem;font-weight:900;
@@ -2351,7 +2356,7 @@ header::after{content:'';position:absolute;inset:0;pointer-events:none;backgroun
     <span><span class="status-dot offline" id="status-dot"></span><span id="status-text">OFFLINE</span></span>
     <span id="clock">--:--:-- ZULU</span>
     <span id="mycall" style="color:var(--cyan);font-family:'Orbitron',sans-serif;font-size:.95rem;letter-spacing:3px;"></span>
-    <span id="vfo-display" style="font-family:'Orbitron',sans-serif;font-size:.85rem;letter-spacing:2px;color:var(--dim);">— · —</span>
+    <span id="vfo-display" style="font-family:'Orbitron',sans-serif;letter-spacing:2px;color:var(--dim);">— · —</span>
   </div>
   <div style="display:flex;align-items:center;gap:0;">
     <div id="scan-btn" class="paused">⏸ SCAN PAUSED</div>
@@ -2481,7 +2486,7 @@ function disableRadar(){
   if(radarRefreshTimer){clearInterval(radarRefreshTimer);radarRefreshTimer=null;}
   if(radarLayer){map.removeLayer(radarLayer);radarLayer=null;}
   var btn=document.getElementById('radar-btn');btn.className='off';btn.textContent='◎ RADAR OFF';}
-var markers=[],beamLines=[],_tunedSpot=null,_tunedCardSpot=null,_activatorMode=false,_lastPark='',_flrigFreqKhz=null,_flrigMode=null;
+var markers=[],beamLines=[],_tunedSpot=null,_tunedCardSpot=null,_activatorMode=false,_lastPark='',_flrigFreqKhz=null,_flrigMode=null,_pinnedTuned=null;
 var BAND_COLORS={'160m':'#ff4444','80m':'#ff8800','60m':'#ffcc00','40m':'#aaff00',
   '30m':'#00ffaa','20m':'#00e5ff','17m':'#0088ff','15m':'#8844ff',
   '12m':'#ff44cc','10m':'#ff2288','6m':'#ff0055','2m':'#ff6688','other':'#aaaaaa'};
@@ -2498,6 +2503,20 @@ function freqToBand(k){
 function clearMarkers(){
   markers.forEach(function(m){map.removeLayer(m);});markers=[];
   beamLines.forEach(function(l){map.removeLayer(l);});beamLines=[];}
+function showTunedCard(s){
+  var tsBox=document.getElementById('tuned-station-box');
+  var tsEmpty=document.getElementById('ts-empty');
+  if(s&&s.activator){
+    _tunedCardSpot=s;
+    document.getElementById('ts-call').textContent=s.activator;
+    var tdet='';
+    if(s.gs)tdet+='<span>Grid: '+s.gs+'</span>';
+    if(s.park)tdet+='<span>Park: '+s.park+(s.park_name?' — '+s.park_name:'')+'</span>';
+    var mhz=s.freq_khz?(s.freq_khz/1000).toFixed(3)+' MHz':'';
+    if(mhz||s.mode)tdet+='<span>'+[mhz,s.mode].filter(Boolean).join(' ')+'</span>';
+    document.getElementById('ts-detail').innerHTML=tdet;
+    tsBox.style.display='block';tsEmpty.style.display='none';
+  }else{tsBox.style.display='none';tsEmpty.style.display='block';}}
 function updateStatsPanel(d){
   var spots=d.spots||[],qsos=d.qsos||[];
   document.getElementById('stat-spots').textContent=spots.length||'—';
@@ -2522,20 +2541,15 @@ function updateStatsPanel(d){
     document.getElementById('ll-detail').innerHTML=det;
     llBox.style.display='block';llEmpty.style.display='none';
   }else{llBox.style.display='none';llEmpty.style.display='block';}
-  var tsBox=document.getElementById('tuned-station-box');
-  var tsEmpty=document.getElementById('ts-empty');
   if(d.tuned_spots&&d.tuned_spots.length&&d.tuned_spots[0].activator){
-    var ts=d.tuned_spots[0];
-    _tunedSpot=ts;_tunedCardSpot=ts;
-    document.getElementById('ts-call').textContent=ts.activator;
-    var tdet='';
-    if(ts.gs)tdet+='<span>Grid: '+ts.gs+'</span>';
-    if(ts.park)tdet+='<span>Park: '+ts.park+(ts.park_name?' — '+ts.park_name:'')+'</span>';
-    var mhz=ts.freq_khz?(ts.freq_khz/1000).toFixed(3)+' MHz':'';
-    if(mhz||ts.mode)tdet+='<span>'+[mhz,ts.mode].filter(Boolean).join(' ')+'</span>';
-    document.getElementById('ts-detail').innerHTML=tdet;
-    tsBox.style.display='block';tsEmpty.style.display='none';
-  }else{_tunedSpot=null;tsBox.style.display='none';tsEmpty.style.display='block';}}
+    var preferred=null;
+    if(_pinnedTuned){
+      preferred=d.tuned_spots.find(function(t){return t.activator===_pinnedTuned.activator&&t.park===_pinnedTuned.park;})||null;
+      if(!preferred)_pinnedTuned=null;
+    }
+    _tunedSpot=preferred||d.tuned_spots[0];
+    showTunedCard(_tunedSpot);
+  }else{_tunedSpot=null;_pinnedTuned=null;showTunedCard(null);}}
 function updateSpotsPanel(d){
   var spots=(d.spots||[]).slice();
   spots.sort(function(a,b){return(a.spot_time||'').localeCompare(b.spot_time||'');});
@@ -2558,6 +2572,8 @@ function updateSpotsPanel(d){
     var i=parseInt(item.dataset.i);
     var s=spots[i];
     item.addEventListener('click',function(){
+      _pinnedTuned={activator:s.activator,park:s.park};
+      showTunedCard(s);
       fetch('/tune',{method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({activator:s.activator,park:s.park,freq_khz:s.freq_khz,mode:s.mode,tuned:s.tuned})})
         .then(function(r){return r.json();}).then(function(d){
@@ -2987,6 +3003,8 @@ function clearLogModal(){
                     self.send_response(200)
                     self.send_header("Content-Type", "text/html; charset=utf-8")
                     self.send_header("Content-Length", str(len(body)))
+                    self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
+                    self.send_header("Pragma", "no-cache")
                     self.end_headers()
                     self.wfile.write(body)
 
@@ -4275,6 +4293,7 @@ function clearLogModal(){
         self.conn.commit()
         rewrite_adif(self.adif_path, self.conn,
                      self.cfg.get("callsign","").upper())
+        load_adif_into_index(self.adif_path, self.conn)
         self._reload_table()
         self._set_status(f"Deleted QSO #{qso_id}")
 
@@ -4743,7 +4762,21 @@ class EditDialog(tk.Toplevel):
         tk.Button(bf, text="✔ Save", bg=ACC3, fg=BG,
                   command=self._save, **bc).pack(side="left", padx=6)
         tk.Button(bf, text="✕ Cancel", bg=BG3, fg=FG,
-                  command=self.destroy, **bc).pack(side="left")
+                  command=self.destroy, **bc).pack(side="left", padx=6)
+        tk.Button(bf, text="🗑 Delete", bg=WARN, fg=BG,
+                  command=self._delete, **bc).pack(side="left")
+
+    def _delete(self):
+        if not messagebox.askyesno("Delete",
+                f"Delete QSO #{self.row['id']} with {self.row['call']} on {self.row['date']}?",
+                parent=self):
+            return
+        self.conn.execute("DELETE FROM qso WHERE id=?", (self.row["id"],))
+        self.conn.commit()
+        rewrite_adif(self.adif_path, self.conn, self.mycall.upper())
+        load_adif_into_index(self.adif_path, self.conn)
+        self.refresh_cb()
+        self.destroy()
 
     def _save(self):
         vals = {k: w.get().strip() for k, w in self._entries.items()}
