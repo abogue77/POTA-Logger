@@ -2335,7 +2335,7 @@ header::after{content:'';position:absolute;inset:0;pointer-events:none;backgroun
 .day-mode .spot-item.worked:hover{background:rgba(26,102,0,.12);}
 .day-mode .spot-badge.worked{color:#1a6600;font-weight:bold;}
 /* ── VFO display ─────────────────────────────────────────────── */
-#vfo-display{transition:color .4s;font-size:.85rem;}
+#vfo-display{transition:color .4s;font-size:.85rem;color:var(--dim);}
 #vfo-display.live{color:var(--green);font-size:1.1rem;text-shadow:0 0 6px rgba(0,255,136,.4);}
 .day-mode #vfo-display.live{font-size:.85rem;text-shadow:none;}
 /* ── Activator banner ────────────────────────────────────────── */
@@ -2356,7 +2356,7 @@ header::after{content:'';position:absolute;inset:0;pointer-events:none;backgroun
     <span><span class="status-dot offline" id="status-dot"></span><span id="status-text">OFFLINE</span></span>
     <span id="clock">--:--:-- ZULU</span>
     <span id="mycall" style="color:var(--cyan);font-family:'Orbitron',sans-serif;font-size:.95rem;letter-spacing:3px;"></span>
-    <span id="vfo-display" style="font-family:'Orbitron',sans-serif;letter-spacing:2px;color:var(--dim);">— · —</span>
+    <span id="vfo-display" style="font-family:'Orbitron',sans-serif;letter-spacing:2px;">— · —</span>
   </div>
   <div style="display:flex;align-items:center;gap:0;">
     <div id="scan-btn" class="paused">⏸ SCAN PAUSED</div>
