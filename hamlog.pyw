@@ -2336,8 +2336,8 @@ header::after{content:'';position:absolute;inset:0;pointer-events:none;backgroun
 .day-mode .spot-badge.worked{color:#1a6600;font-weight:bold;}
 /* ── VFO display ─────────────────────────────────────────────── */
 #vfo-display{transition:color .4s;font-size:.85rem;}
-#vfo-display.live{color:var(--green);font-size:1.15rem;font-weight:bold;text-shadow:0 0 12px var(--green),0 0 24px rgba(0,255,136,.4);}
-.day-mode #vfo-display.live{font-size:.85rem;font-weight:normal;text-shadow:none;}
+#vfo-display.live{color:var(--green);font-size:1.1rem;text-shadow:0 0 6px rgba(0,255,136,.4);}
+.day-mode #vfo-display.live{font-size:.85rem;text-shadow:none;}
 /* ── Activator banner ────────────────────────────────────────── */
 #activator-banner{display:none;position:absolute;top:28px;left:0;right:0;
   text-align:center;font-family:'Orbitron',sans-serif;font-size:2.2rem;font-weight:900;
